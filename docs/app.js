@@ -618,7 +618,9 @@ function openCard(id) {
   overlay.classList.remove('hidden');
 }
 function closeModal() { overlay.classList.add('hidden'); currentCardId = null; }
-overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+let overlayPressTarget = null;
+overlay.addEventListener('pointerdown', (e) => { overlayPressTarget = e.target; });
+overlay.addEventListener('click', (e) => { if (e.target === overlay && overlayPressTarget === overlay) closeModal(); });
 $('modal-close').addEventListener('click', closeModal);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.classList.contains('hidden')) closeModal(); });
 
