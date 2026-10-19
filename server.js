@@ -11,6 +11,8 @@ const DATA_DIR = path.join(__dirname, 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const BOARD_FILE = path.join(DATA_DIR, 'board.json');
 const PORT = process.env.PORT || 4321;
+// Only this machine by default: the board has no accounts, so anyone who can reach it can edit it.
+const HOST = process.env.HOST || '127.0.0.1';
 
 const STARTER_BINDERS = ['To Do', 'In Progress', 'Blocked', 'Reviewing', 'Completed'];
 const STAGE_TITLES = {
@@ -443,7 +445,7 @@ app.use((err, req, res, next) => {
   res.status(400).json({ error: err.message || 'request failed' });
 });
 
-app.listen(PORT, () => {
-  console.log(`driftboard running at http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`driftboard running at http://${HOST}:${PORT}`);
   console.log(`data dir: ${DATA_DIR}`);
 });

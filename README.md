@@ -106,6 +106,10 @@ npm start
 
 Then open **http://localhost:4321**. Use a different port with `PORT=5000 npm start`.
 
+The server listens on this machine only (`127.0.0.1`). To reach it from other
+devices, start it with `HOST=0.0.0.0`, but keep in mind the board has no accounts:
+anyone who can reach the port can read and change it.
+
 ---
 
 ## 💾 Where your stuff is saved
