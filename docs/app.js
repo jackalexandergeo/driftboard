@@ -226,13 +226,17 @@ async function loadState() {
   await loadWorkspace(activeWorkspaceId);
 }
 async function loadWorkspace(id) {
-  ws = await api('GET', `/api/workspaces/${id}`);
-  activeWorkspaceId = id;
+  showWorkspace(await api('GET', `/api/workspaces/${id}`));
+}
+function showWorkspace(fresh) {
+  ws = fresh; activeWorkspaceId = fresh.id;
   panX = ws.view?.panX || 0; panY = ws.view?.panY || 0; zoom = clampZoom(ws.view?.zoom || 1);
   updateTransform(); renderWorkspace(); renderTabs();
 }
 async function reloadWorkspace() {
-  ws = await api('GET', `/api/workspaces/${activeWorkspaceId}`);
+  const fresh = await api('GET', `/api/workspaces/${activeWorkspaceId}`);
+  if (gesturing()) { changedElsewhere = true; return; } // a drag began meanwhile: the next check draws this
+  ws = fresh;
   renderWorkspace();
 }
 
@@ -796,6 +800,7 @@ function startAttReorder(e, attEl) {
     if (!moved) return;
     document.body.classList.remove('att-reordering');
     if (ghost) ghost.remove();
+    if (!attEl.isConnected || !placeholder.isConnected) { renderAttachments(); return; } // redrawn meanwhile (an upload landed): drop the gesture
     attachmentsEl.insertBefore(attEl, placeholder);
     placeholder.remove();
     attEl.classList.remove('att-drag-source');
@@ -887,21 +892,33 @@ async function removeAttachment(attId) {
     editingAtts.delete(attId); renderAttachments(); renderWorkspace();
   } catch (e) { toast(e.message); }
 }
+// The board may be redrawn while an attachment is on its way: add it to the card as it is now.
+function addToCard(cardId, att) {
+  const card = ws.cards.find((c) => c.id === cardId);
+  if (card && !card.attachments.some((a) => a.id === att.id)) card.attachments.push(att);
+}
 async function addJsonAttachment(payload) {
-  const card = currentCard();
-  const att = await api('POST', `/api/cards/${card.id}/attachments`, payload);
-  card.attachments.push(att);
+  const cardId = currentCardId;
+  const att = await api('POST', `/api/cards/${cardId}/attachments`, payload);
+  addToCard(cardId, att);
   return att;
 }
+let uploading = 0;
 async function uploadFiles(files) {
-  const card = currentCard(); if (!card) return;
+  const cardId = currentCardId; if (!currentCard()) return;
   const newIds = [];
-  for (const file of files) {
-    const fd = new FormData(); fd.append('file', file);
-    try { const att = await api('POST', `/api/cards/${card.id}/attachments`, fd, true); card.attachments.push(att); newIds.push(att.id); }
-    catch (e) { toast(`${file.name}: ${e.message}`); }
+  uploading++;
+  try {
+    for (const file of files) {
+      const fd = new FormData(); fd.append('file', file);
+      try { const att = await api('POST', `/api/cards/${cardId}/attachments`, fd, true); addToCard(cardId, att); newIds.push(att.id); }
+      catch (e) { toast(`${file.name}: ${e.message}`); }
+    }
+    if (currentCardId === cardId) await afterAttachmentsAdded(newIds);
+    else renderWorkspace(); // another card is open now: only its badge on the canvas changes
+  } finally {
+    uploading--;
   }
-  await afterAttachmentsAdded(newIds);
 }
 
 // New attachments land at the top under Custom and Newest-first order, and at the
@@ -1082,10 +1099,22 @@ function noteWrite(res) {
   if (knownRevision !== null && revision === knownRevision + 1) knownRevision = revision;
   else changedElsewhere = true;
 }
-// Never redraw under the user's hands: a drag, an open menu or editor, or a field being typed in.
+// Never redraw under the user's hands. A drag holds on to the elements it started from, and so
+// does a press that has not moved far enough to be a drag yet.
+let pointerDown = false;
+window.addEventListener('pointerdown', () => { pointerDown = true; }, true);
+window.addEventListener('pointerup', () => { pointerDown = false; }, true);
+window.addEventListener('pointercancel', () => { pointerDown = false; }, true);
+window.addEventListener('blur', () => { pointerDown = false; });
+function gesturing() {
+  return pointerDown || document.body.classList.contains('dragging-card') || document.body.classList.contains('att-reordering')
+    || !!document.querySelector('.binder-dragging');
+}
+// Nor while a menu or editor is open or a field is being typed in, nor while a save or upload
+// is on its way (it would land on the card it started from, after the redraw replaced it).
 function busy() {
   const focused = document.activeElement;
-  return document.body.classList.contains('dragging-card') || !!document.querySelector('.binder-dragging')
+  return gesturing() || pendingWrites > 0 || uploading > 0
     || !!openMenuEl || currentBinderId !== null || descEditing || editingAtts.size > 0
     || (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA'));
 }
@@ -1095,13 +1124,14 @@ async function checkForChanges() {
   try {
     const { data: s, revision } = await request('GET', '/api/state');
     if (revision === knownRevision && !changedElsewhere) return;
-    if (busy()) return; // the user started something while we asked
     changedElsewhere = false;
+    const boardGone = !s.workspaces.some((w) => w.id === activeWorkspaceId);
+    const { data: fresh, revision: drawn } = await request('GET', `/api/workspaces/${boardGone ? s.activeWorkspaceId : activeWorkspaceId}`);
+    if (busy()) { changedElsewhere = true; return; } // the user started something while we asked: next time
     wsList = s.workspaces;
-    if (!wsList.some((w) => w.id === activeWorkspaceId)) { await loadWorkspace(s.activeWorkspaceId); knownRevision = revision; return; }
-    const { data: fresh, revision: drawn } = await request('GET', `/api/workspaces/${activeWorkspaceId}`);
-    ws = fresh; renderWorkspace(); renderTabs();
     knownRevision = drawn; // what was drawn, even if older: a server that went back must not redraw forever
+    if (boardGone) { showWorkspace(fresh); return; }
+    ws = fresh; renderWorkspace(); renderTabs();
     if (currentCardId) {
       const card = currentCard();
       if (!card) { closeModal(); return; }
