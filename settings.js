@@ -11,8 +11,9 @@ export const PORT = process.env.PORT || 4321;
 // machine's name, which would quietly open the board to the network.
 export const HOST = process.env.DRIFTBOARD_HOST || '127.0.0.1';
 
-// The address a browser on this machine uses, with the sign-in token when given one.
-export function localURL(token) {
-  const host = HOST === '0.0.0.0' || HOST === '::' ? 'localhost' : HOST.includes(':') ? `[${HOST}]` : HOST;
-  return `http://${host}:${PORT}/` + (token ? `?token=${encodeURIComponent(token)}` : '');
+// The address a browser on this machine uses. A browser keeps its sign-in per address, and
+// localhost is another address than 127.0.0.1 to it, so this is always the same one.
+export function localURL() {
+  const host = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST.includes(':') ? `[${HOST}]` : HOST;
+  return `http://${host}:${PORT}/`;
 }

@@ -111,14 +111,40 @@ npm start
 ```
 
 Then, in another terminal, run `npm run open`: it opens the board in your browser
-and signs you in. The board has no accounts; one token, made on first start and kept
-in `data/token`, opens it, and your browser keeps it in a cookie after that first link.
-Scripts can send it as `Authorization: Bearer <token>`. Use a different port with
-`PORT=5000 npm start` (and the same `PORT` for `npm run open`).
+and signs you in. Run it with the same `DRIFTBOARD_DATA`, `DRIFTBOARD_HOST` and `PORT`
+as the server (`PORT=5000 npm start`, then `PORT=5000 npm run open`).
+
+### Signing in
+
+The board has no accounts. On first start the server makes a random token and keeps
+it in `data/token`, readable only by you; whoever has the token can read and change
+the board. `npm run open` asks the server for a sign-in code that works once, for a
+minute, and opens `http://127.0.0.1:4321/?code=…`; the page swaps the code for the
+token, keeps it in the browser's storage and takes the code out of the address bar.
+So the token never shows up in an address, in the browser's command line (which every
+user of the machine can read) or in its history. There are no cookies.
+
+The browser keeps the sign-in per address: `http://127.0.0.1:4321` and
+`http://localhost:4321` are different sites to it, so each needs its own sign-in.
+`npm run open -- --print` prints the link without opening a browser.
+
+Scripts send the token as `Authorization: Bearer <token>` on every `/api` call:
+
+- `POST /api/sign-in-codes` returns `{"code": …, "expiresAt": …}`: open
+  `http://127.0.0.1:4321/?code=<code>` to sign a browser in (add `#card=<id>` to open a
+  card once signed in).
+- An uploaded file is at `/uploads/<file>?k=<key>`, where the key is the HMAC-SHA256
+  of `uploads` keyed with the token, in hex (`GET /api/session` returns it as
+  `uploadsKey`). The key opens uploaded files only.
+
+### Other devices
 
 The server listens on this machine only (`127.0.0.1`). To reach it from other
-devices, start it with `DRIFTBOARD_HOST=0.0.0.0`, but keep in mind the board has no
-accounts: anyone who can reach the port can read and change it.
+devices, start it with `DRIFTBOARD_HOST=0.0.0.0` and sign each browser in with a link
+from `npm run open -- --print`, with this machine's address in place of `127.0.0.1`.
+Keep in mind that the board speaks plain HTTP: the token, and everything on the board,
+travel unencrypted over the network, so anyone who can watch that network can take
+the token and with it the board. Put an HTTPS proxy in front of it, or keep it local.
 
 ---
 

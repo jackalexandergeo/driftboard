@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { fileURLToPath } from 'node:url';
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -153,9 +153,11 @@ function attachmentType(mimeType) {
 }
 
 // --- Access ----------------------------------------------------------------
-// The board has no accounts: one token, made on first start, opens it. A browser signs in
-// once with the link from `npm run open` and keeps the token in a cookie; scripts send it
-// as a bearer token. The page itself is public code (it is the GitHub Pages demo too).
+// The board has no accounts: one token, made on first start, opens it. Every API call sends
+// it as `Authorization: Bearer <token>`. There is no cookie: a cookie for 127.0.0.1 also goes
+// to every other port on it, where any local user can listen. A browser signs in with a
+// one-time code from `npm run open` (POST /api/session), so the address it is opened with
+// never holds the token. The page itself is public code (it is the GitHub Pages demo too).
 
 function loadToken() {
   try {
@@ -169,47 +171,80 @@ function loadToken() {
   return made;
 }
 const TOKEN = loadToken();
-const COOKIE = 'driftboard_token';
+// Uploaded files load through <img> and <video>, which cannot send a header: their links
+// carry this key instead. It opens the uploads only, never the API.
+const UPLOADS_KEY = createHmac('sha256', TOKEN).update('uploads').digest('hex');
 
-function isToken(value) {
-  const given = Buffer.from(String(value || ''));
-  const wanted = Buffer.from(TOKEN);
-  return given.length === wanted.length && timingSafeEqual(given, wanted);
+function sameSecret(given, wanted) {
+  const a = Buffer.from(String(given ?? ''));
+  const b = Buffer.from(wanted);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 function requestToken(req) {
-  const bearer = /^Bearer (.+)$/.exec(req.get('Authorization') || '');
-  if (bearer) return bearer[1].trim();
-  const cookie = (req.get('Cookie') || '').split(';').map((part) => part.trim())
-    .find((part) => part.startsWith(COOKIE + '='));
-  return cookie ? decodeURIComponent(cookie.slice(COOKIE.length + 1)) : null;
-}
-
-// The sign-in link: keep the token in a cookie, then drop it from the address bar.
-function signIn(req, res, next) {
-  if (req.method !== 'GET' || req.query.token === undefined) return next();
-  if (!isToken(req.query.token)) return res.status(401).send('That sign-in link is not valid for this board.');
-  res.cookie(COOKIE, TOKEN, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: 365 * 24 * 3600 * 1000 });
-  const url = new URL(req.originalUrl, 'http://board.invalid');
-  url.searchParams.delete('token');
-  res.redirect(303, url.pathname + url.search + url.hash);
+  const bearer = /^bearer\s+(.+)$/i.exec(req.get('Authorization') || '');
+  return bearer ? bearer[1].trim() : null;
 }
 
 function requireToken(req, res, next) {
-  if (!isToken(requestToken(req))) {
-    return res.status(401).json({ error: 'this board is locked: open it with the link from `npm run open`' });
+  if (!sameSecret(requestToken(req), TOKEN)) {
+    return res.status(401).json({ error: 'this board is locked: open it with `npm run open`' });
   }
-  // A page on another local port is the same site, so the cookie alone would let it write.
+  next();
+}
+// Belt and braces: no page from another origin may write, whatever it sends.
+function refuseForeignWrites(req, res, next) {
   const origin = req.get('Origin');
-  if (req.method !== 'GET' && origin && origin !== `${req.protocol}://${req.get('Host')}`) {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && origin && origin !== `${req.protocol}://${req.get('Host')}`) {
     return res.status(403).json({ error: 'cross-origin writes are not allowed' });
   }
   next();
 }
 
+// One-time sign-in codes: each works once, for a minute. They are kept by their hash, so
+// looking one up says nothing about the codes that exist.
+const CODE_LIFETIME = 60 * 1000;
+const MAX_CODES = 32;
+const signInCodes = new Map(); // hash -> expiry, oldest first
+const codeHash = (code) => createHash('sha256').update(code).digest('hex');
+function makeSignInCode() {
+  const time = Date.now();
+  for (const [hash, expiresAt] of signInCodes) if (expiresAt <= time) signInCodes.delete(hash);
+  while (signInCodes.size >= MAX_CODES) signInCodes.delete(signInCodes.keys().next().value);
+  const code = randomBytes(24).toString('base64url');
+  const expiresAt = time + CODE_LIFETIME;
+  signInCodes.set(codeHash(code), expiresAt);
+  return { code, expiresAt };
+}
+function useSignInCode(code) {
+  if (typeof code !== 'string' || !code) return false;
+  const hash = codeHash(code);
+  const expiresAt = signInCodes.get(hash);
+  signInCodes.delete(hash);
+  return expiresAt !== undefined && expiresAt > Date.now();
+}
+
 // --- App -------------------------------------------------------------------
 
 const app = express();
-app.use(signIn);
+app.use((req, res, next) => {
+  res.set('Content-Security-Policy', "frame-ancestors 'none'"); // no other page may frame the board
+  res.set('X-Frame-Options', 'DENY');
+  res.set('Referrer-Policy', 'no-referrer'); // links out of the board do not carry its address
+  next();
+});
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+}, refuseForeignWrites);
+
+// Swap a sign-in code for the token: the one call that needs no token.
+app.post('/api/session', express.json({ limit: '4kb' }), (req, res) => {
+  if (!useSignInCode(req.body?.code)) {
+    return res.status(401).json({ error: 'that sign-in code is not valid (each works once, for a minute): run `npm run open` again' });
+  }
+  res.json({ token: TOKEN });
+});
+
 app.use('/api', requireToken);
 app.use('/api', (req, res, next) => {
   const json = res.json.bind(res);
@@ -219,10 +254,21 @@ app.use('/api', (req, res, next) => {
   };
   next();
 });
-app.use('/uploads', requireToken);
+app.use('/uploads', (req, res, next) => {
+  if (sameSecret(req.query.k, UPLOADS_KEY) || sameSecret(requestToken(req), TOKEN)) return next();
+  res.status(401).send('this file needs the board\'s uploads key');
+});
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'docs'))); // static site (also the GitHub Pages source); marked/purify are vendored under docs/vendor/
 app.use('/uploads', express.static(UPLOADS_DIR));
+
+// ---- Session ----
+app.post('/api/sign-in-codes', (req, res) => {
+  res.status(201).json(makeSignInCode());
+});
+app.get('/api/session', (req, res) => {
+  res.json({ uploadsKey: UPLOADS_KEY });
+});
 
 // ---- Workspaces ----
 app.get('/api/state', (req, res) => {
@@ -520,7 +566,6 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, HOST, () => {
-  console.log(`driftboard running at ${localURL()}; sign in with: npm run open`);
-  if (process.stdout.isTTY) console.log(`sign-in link: ${localURL(TOKEN)}`);
+  console.log(`driftboard running at ${localURL()}; open it with: npm run open`);
   console.log(`data dir: ${DATA_DIR}`);
 });

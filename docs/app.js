@@ -56,20 +56,54 @@ function endSave() {
   }, wait);
 }
 
+// ---------- sign-in ----------
+// The board's data needs its token; the page itself is public. `npm run open` opens the board
+// with a one-time code (?code=), which is swapped for the token here. The token stays in this
+// browser's storage for this address and goes with every API call as a bearer token.
+const TOKEN_KEY = 'driftboard-token';
+let token = null;
+try { token = localStorage.getItem(TOKEN_KEY); } catch { /* no storage: sign in again next time */ }
+let uploadsKey = '';
+let locked = false;
+
+async function signInWithCode() {
+  const address = new URL(location.href);
+  const code = address.searchParams.get('code');
+  if (DEMO || !code) return;
+  address.searchParams.delete('code'); // out of the address bar (and so out of a bookmark); #card= stays
+  history.replaceState(history.state, '', address.pathname + address.search + address.hash);
+  const res = await fetch('/api/session', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
+  }).catch(() => null);
+  if (!res || !res.ok) {
+    toast(res ? 'That sign-in link has expired or was used already: run `npm run open` again' : 'Could not reach the board to sign in');
+    return;
+  }
+  token = (await res.json()).token;
+  try { localStorage.setItem(TOKEN_KEY, token); } catch { /* signed in for this page only */ }
+}
+function showLocked() {
+  locked = true;
+  $('locked').classList.remove('hidden');
+}
+
 // ---------- api ----------
 async function api(method, url, body, isForm) {
-  const opts = { method };
+  const opts = { method, headers: {} };
   if (isForm) opts.body = body;
-  else if (body !== undefined) { opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(body); }
+  else if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   const isWrite = method !== 'GET';
   if (isWrite) beginSave();
   try {
     if (DEMO) return await window.DriftboardDemo.handle(method, url, body, isForm); // browser backend, same shapes
+    if (!token) { showLocked(); throw Object.assign(new Error('this board is locked: open it with `npm run open`'), { status: 401 }); }
+    opts.headers.Authorization = `Bearer ${token}`;
     const res = await fetch(url, opts);
     noteRevision(res, isWrite);
+    if (res.status === 401) showLocked();
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || 'request failed');
+      throw Object.assign(new Error(err.error || 'request failed'), { status: res.status });
     }
     return res.status === 204 ? null : await res.json();
   } finally {
@@ -117,7 +151,7 @@ function stripMd(s) {
     .replace(/\s+/g, ' ')
     .trim();
 }
-const fileUrl = (a) => (DEMO ? window.DriftboardDemo.fileUrl(a.filename) : `/uploads/${a.filename}`);
+const fileUrl = (a) => (DEMO ? window.DriftboardDemo.fileUrl(a.filename) : `/uploads/${encodeURIComponent(a.filename)}?k=${uploadsKey}`);
 const looksLikeImage = (u) => /\.(png|jpe?g|gif|webp|svg|bmp|avif)(\?|#|$)/i.test(u);
 const looksLikeVideo = (u) => /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(u);
 const clampZoom = (z) => Math.min(2.5, Math.max(0.25, z));
@@ -173,6 +207,7 @@ function saveView() {
 
 // ---------- load / render ----------
 async function loadState() {
+  if (!DEMO) uploadsKey = (await api('GET', '/api/session')).uploadsKey;
   const s = await api('GET', '/api/state');
   wsList = s.workspaces; activeWorkspaceId = s.activeWorkspaceId;
   renderTabs();
@@ -1037,8 +1072,9 @@ function busy() {
     || (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA'));
 }
 async function checkForChanges() {
-  if (DEMO || document.hidden || busy() || !ws) return;
-  const res = await fetch('/api/state').catch(() => null);
+  if (DEMO || locked || document.hidden || busy() || !ws) return;
+  const res = await fetch('/api/state', { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+  if (res && res.status === 401) showLocked();
   if (!res || !res.ok) return;
   const revision = Number(res.headers.get('X-Board-Revision'));
   if (revision === knownRevision && !changedElsewhere) return;
@@ -1066,7 +1102,7 @@ if (!DEMO) {
 // #card=<id> opens that card, on whichever board it is (a link from another app, a bookmark).
 async function openLinkedCard() {
   const id = new URLSearchParams(location.hash.slice(1)).get('card');
-  if (!id) return;
+  if (!id || locked) return;
   try {
     const { workspaceId } = await api('GET', `/api/cards/${encodeURIComponent(id)}`);
     if (workspaceId !== activeWorkspaceId) await switchWorkspace(workspaceId);
@@ -1076,4 +1112,4 @@ async function openLinkedCard() {
 window.addEventListener('hashchange', () => { openLinkedCard(); });
 
 // ---------- go ----------
-loadState().then(openLinkedCard).catch((e) => toast('Failed to load: ' + e.message));
+signInWithCode().then(loadState).then(openLinkedCard).catch((e) => { if (!locked) toast('Failed to load: ' + e.message); });

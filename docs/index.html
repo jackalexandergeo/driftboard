@@ -53,6 +53,13 @@
       <button class="tool-btn icon-only" id="zoom-in" title="Zoom in">+</button>
     </div>
 
+    <div class="locked hidden" id="locked" role="alert">
+      <h2>This board is locked</h2>
+      <p>Open it from a terminal on the machine it runs on with <code>npm run open</code>
+        (with the same <code>DRIFTBOARD_DATA</code> and <code>PORT</code> as the server).
+        That signs this browser in, for this address.</p>
+    </div>
+
     <div class="canvas-hint" id="canvas-hint">Scroll to pan · ⌘/Ctrl + scroll to zoom · drag empty space to move around</div>
   </main>
 
