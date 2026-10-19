@@ -353,6 +353,13 @@ app.post('/api/workspaces/:id/cards', (req, res) => {
   res.status(201).json(card);
 });
 
+// Which board a card is on, for a link straight to it.
+app.get('/api/cards/:id', (req, res) => {
+  const found = getCard(req.params.id);
+  if (!found) return res.status(404).json({ error: 'card not found' });
+  res.json({ workspaceId: found.ws.id, card: found.card });
+});
+
 app.patch('/api/cards/:id', (req, res) => {
   const found = getCard(req.params.id);
   if (!found) return res.status(404).json({ error: 'card not found' });

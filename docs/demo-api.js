@@ -342,6 +342,7 @@
     if (seg[0] === 'api' && seg[1] === 'cards' && seg.length === 3) {
       const found = getCard(seg[2]); if (!found) throw err('card not found');
       const { card } = found;
+      if (method === 'GET') return { workspaceId: found.ws.id, card };
       if (method === 'PATCH') {
         if (typeof j.title === 'string') card.title = j.title;
         if (typeof j.description === 'string') card.description = j.description;

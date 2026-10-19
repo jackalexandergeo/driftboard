@@ -1062,5 +1062,18 @@ if (!DEMO) {
   document.addEventListener('visibilitychange', () => { checkForChanges().catch(() => {}); });
 }
 
+// ---------- links to a card ----------
+// #card=<id> opens that card, on whichever board it is (a link from another app, a bookmark).
+async function openLinkedCard() {
+  const id = new URLSearchParams(location.hash.slice(1)).get('card');
+  if (!id) return;
+  try {
+    const { workspaceId } = await api('GET', `/api/cards/${encodeURIComponent(id)}`);
+    if (workspaceId !== activeWorkspaceId) await switchWorkspace(workspaceId);
+    openCard(id);
+  } catch (e) { toast('That card is gone: ' + e.message); }
+}
+window.addEventListener('hashchange', () => { openLinkedCard(); });
+
 // ---------- go ----------
-loadState().catch((e) => toast('Failed to load: ' + e.message));
+loadState().then(openLinkedCard).catch((e) => toast('Failed to load: ' + e.message));

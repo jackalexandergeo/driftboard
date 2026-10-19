@@ -89,6 +89,8 @@ for your personal use. Instead, [Run it locally](#-run-it-locally).
 **Live**
 - Changes made in another tab, or by a script through the API, show up within a few
   seconds; nothing is redrawn while you are dragging, typing or have a menu open.
+- **Link to a card** with `#card=<card id>` at the end of the board's address: it opens
+  that card on whichever board it is.
 
 **Undo**
 - Deleting a card or binder is **undoable** — the toast's **Undo** button or
