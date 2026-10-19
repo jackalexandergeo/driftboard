@@ -88,27 +88,32 @@ function showLocked() {
 }
 
 // ---------- api ----------
-async function api(method, url, body, isForm) {
+// The reply, and the board revision it was sent at (none in the demo).
+async function request(method, url, body, isForm) {
   const opts = { method, headers: {} };
   if (isForm) opts.body = body;
   else if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   const isWrite = method !== 'GET';
   if (isWrite) beginSave();
   try {
-    if (DEMO) return await window.DriftboardDemo.handle(method, url, body, isForm); // browser backend, same shapes
+    if (DEMO) return { data: await window.DriftboardDemo.handle(method, url, body, isForm), revision: null }; // browser backend, same shapes
     if (!token) { showLocked(); throw Object.assign(new Error('this board is locked: open it with `npm run open`'), { status: 401 }); }
     opts.headers.Authorization = `Bearer ${token}`;
     const res = await fetch(url, opts);
-    noteRevision(res, isWrite);
+    if (isWrite) noteWrite(res);
     if (res.status === 401) showLocked();
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
       throw Object.assign(new Error(err.error || 'request failed'), { status: res.status });
     }
-    return res.status === 204 ? null : await res.json();
+    const data = res.status === 204 ? null : await res.json();
+    return { data, revision: Number(res.headers.get('X-Board-Revision')) || null };
   } finally {
     if (isWrite) endSave();
   }
+}
+async function api(method, url, body, isForm) {
+  return (await request(method, url, body, isForm)).data;
 }
 
 // ---------- utils ----------
@@ -1064,15 +1069,18 @@ document.addEventListener('keydown', (e) => {
 }, true);
 
 // ---------- live updates ----------
-// Another tab or a script may change the board. Each response carries the board's revision:
-// a write that moves it one step is this tab's own; anything else means a redraw is due.
+// Another tab or a script may change the board. Each response carries the board's revision.
+// knownRevision is the revision this tab last drew: a write of its own moves it one step, and
+// any other step means a change from elsewhere. A read leaves it alone (a read does not
+// redraw the board, so what it saw is not on screen); the check below sets it to what it drew.
 let knownRevision = null;
 let changedElsewhere = false;
-function noteRevision(res, isWrite) {
+let checking = false;
+function noteWrite(res) {
   const revision = Number(res.headers.get('X-Board-Revision'));
   if (!revision) return;
-  if (isWrite && knownRevision !== null && revision !== knownRevision + 1) changedElsewhere = true;
-  if (knownRevision === null || revision > knownRevision) knownRevision = revision;
+  if (knownRevision !== null && revision === knownRevision + 1) knownRevision = revision;
+  else changedElsewhere = true;
 }
 // Never redraw under the user's hands: a drag, an open menu or editor, or a field being typed in.
 function busy() {
@@ -1082,25 +1090,30 @@ function busy() {
     || (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA'));
 }
 async function checkForChanges() {
-  if (DEMO || locked || document.hidden || busy() || !ws) return;
-  const res = await fetch('/api/state', { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
-  if (res && res.status === 401) showLocked();
-  if (!res || !res.ok) return;
-  const revision = Number(res.headers.get('X-Board-Revision'));
-  if (revision === knownRevision && !changedElsewhere) return;
-  const s = await res.json();
-  if (busy()) return; // the user started something while we asked
-  changedElsewhere = false;
-  wsList = s.workspaces;
-  if (!wsList.some((w) => w.id === activeWorkspaceId)) { await loadWorkspace(s.activeWorkspaceId); return; }
-  await reloadWorkspace(); renderTabs();
-  knownRevision = Math.max(knownRevision, revision);
-  if (currentCardId) {
-    const card = currentCard();
-    if (!card) { closeModal(); return; }
-    titleInput.value = card.title;
-    $('card-meta').textContent = `Created ${shortDate(card.createdAt)} · Updated ${shortDate(card.updatedAt)}`;
-    renderDescription(); renderAttachments(); updateSortBtn();
+  if (DEMO || locked || checking || document.hidden || busy() || !ws) return;
+  checking = true;
+  try {
+    const { data: s, revision } = await request('GET', '/api/state');
+    if (revision === knownRevision && !changedElsewhere) return;
+    if (busy()) return; // the user started something while we asked
+    changedElsewhere = false;
+    wsList = s.workspaces;
+    if (!wsList.some((w) => w.id === activeWorkspaceId)) { await loadWorkspace(s.activeWorkspaceId); knownRevision = revision; return; }
+    const { data: fresh, revision: drawn } = await request('GET', `/api/workspaces/${activeWorkspaceId}`);
+    ws = fresh; renderWorkspace(); renderTabs();
+    knownRevision = drawn; // what was drawn, even if older: a server that went back must not redraw forever
+    if (currentCardId) {
+      const card = currentCard();
+      if (!card) { closeModal(); return; }
+      titleInput.value = card.title;
+      $('card-meta').textContent = `Created ${shortDate(card.createdAt)} · Updated ${shortDate(card.updatedAt)}`;
+      renderDescription(); renderAttachments(); updateSortBtn();
+    }
+  } catch (e) {
+    changedElsewhere = true; // try again next time
+    throw e;
+  } finally {
+    checking = false;
   }
 }
 if (!DEMO) {
