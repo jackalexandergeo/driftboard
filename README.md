@@ -124,6 +124,11 @@ token, keeps it in the browser's storage and takes the code out of the address b
 So the token never shows up in an address, in the browser's command line (which every
 user of the machine can read) or in its history. There are no cookies.
 
+`npm run open` makes sure the port is yours before it sends the token. An open tab and
+your scripts cannot: if they keep calling the board after it stops, another user who
+listens on its port would receive the token. So stop them with the board, or keep the
+board running (as a service, say).
+
 The browser keeps the sign-in per address: `http://127.0.0.1:4321` and
 `http://localhost:4321` are different sites to it, so each needs its own sign-in.
 `npm run open -- --print` prints the link without opening a browser.
