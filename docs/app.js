@@ -1145,7 +1145,12 @@ async function checkForChanges() {
     const tabsChanged = !sameData(s.workspaces, wsList);
     wsList = s.workspaces;
     knownRevision = drawn; // what was drawn, even if older: a server that went back must not redraw forever
-    if (boardGone) { showWorkspace(fresh); return; }
+    if (boardGone) {
+      if (currentCardId) closeModal();
+      showWorkspace(fresh);
+      toast('This board was deleted elsewhere');
+      return;
+    }
     if (tabsChanged) renderTabs();
     // Redraw only what changed: a write elsewhere (another board, another tab saving its view)
     // must not restart a video, or lose the scroll and selection in the open card.
@@ -1154,7 +1159,7 @@ async function checkForChanges() {
     ws = fresh; renderWorkspace();
     if (currentCardId) {
       const card = currentCard();
-      if (!card) { closeModal(); return; }
+      if (!card) { closeModal(); toast('This card was deleted elsewhere'); return; }
       if (!sameData(cardContent(card), cardContent(shownCard))) showCard(card);
       else showCardMeta(card); // moved, say: only its dates show that
     }
