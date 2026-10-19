@@ -129,8 +129,15 @@ function toastAction(msg, label, fn) {
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 6000);
 }
+// Every value that goes into HTML, as text or in an attribute, goes through this first.
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+// Only web links are followed: a javascript: or data: one would run on the board when clicked.
+function webURL(value) {
+  const text = String(value ?? '').trim();
+  try { return ['http:', 'https:'].includes(new URL(text).protocol) ? text : null; }
+  catch { return null; }
 }
 function formatBytes(n) {
   if (!n) return '0 B';
@@ -283,7 +290,7 @@ function renderWorkspace() {
 function cardBadges(card) {
   const atts = card.attachments || [];
   const badges = atts.length ? `<div class="card-badges"><span class="badge">${ICON.clip} ${atts.length}</span></div>` : '';
-  const thumbs = atts.filter((a) => a.type === 'image').slice(0, 4).map((a) => `<img src="${fileUrl(a)}" alt="">`).join('');
+  const thumbs = atts.filter((a) => a.type === 'image').slice(0, 4).map((a) => `<img src="${escapeHtml(fileUrl(a))}" alt="">`).join('');
   return `${badges}${thumbs ? `<div class="card-thumbs">${thumbs}</div>` : ''}`;
 }
 
@@ -807,14 +814,17 @@ function attachmentBody(att) {
     return `<div class="markdown">${renderMarkdown(att.content)}</div>`;
   }
   if (att.type === 'url') {
-    const u = att.url;
-    if (looksLikeImage(u)) return `<a href="${u}" target="_blank" rel="noopener">${escapeHtml(u)}</a><img src="${u}" alt="" style="margin-top:6px">`;
-    if (looksLikeVideo(u)) return `<a href="${u}" target="_blank" rel="noopener">${escapeHtml(u)}</a><video src="${u}" controls style="margin-top:6px"></video>`;
-    return `<a href="${u}" target="_blank" rel="noopener">${escapeHtml(att.title || u)}</a>`;
+    const u = webURL(att.url);
+    if (!u) return `<span>${escapeHtml(att.title || att.url || '')}</span>`; // not a web link: shown, never followed
+    const href = escapeHtml(u);
+    if (looksLikeImage(u)) return `<a href="${href}" target="_blank" rel="noopener">${href}</a><img src="${href}" alt="" style="margin-top:6px">`;
+    if (looksLikeVideo(u)) return `<a href="${href}" target="_blank" rel="noopener">${href}</a><video src="${href}" controls style="margin-top:6px"></video>`;
+    return `<a href="${href}" target="_blank" rel="noopener">${escapeHtml(att.title || u)}</a>`;
   }
-  if (att.type === 'image') return `<a href="${fileUrl(att)}" target="_blank" rel="noopener"><img src="${fileUrl(att)}" alt=""></a>`;
-  if (att.type === 'video') return `<video src="${fileUrl(att)}" controls></video>`;
-  return `<a href="${fileUrl(att)}" download="${escapeHtml(att.originalName || '')}">⬇ ${escapeHtml(att.originalName || 'download')}</a> <span style="color:var(--muted);font-size:12px">(${formatBytes(att.size)})</span>`;
+  const src = escapeHtml(fileUrl(att));
+  if (att.type === 'image') return `<a href="${src}" target="_blank" rel="noopener"><img src="${src}" alt=""></a>`;
+  if (att.type === 'video') return `<video src="${src}" controls></video>`;
+  return `<a href="${src}" download="${escapeHtml(att.originalName || '')}">⬇ ${escapeHtml(att.originalName || 'download')}</a> <span style="color:var(--muted);font-size:12px">(${escapeHtml(formatBytes(att.size))})</span>`;
 }
 function renderAttachment(att) {
   const el = document.createElement('div');
@@ -824,9 +834,9 @@ function renderAttachment(att) {
   el.innerHTML = `
     <div class="att-head">
       <span class="att-grip" title="Drag to reorder">${ICON.grip}</span>
-      <span class="att-type">${att.type}</span>
+      <span class="att-type">${escapeHtml(att.type)}</span>
       ${att.originalName ? `<span class="att-name">${escapeHtml(att.originalName)}</span>` : ''}
-      <span class="att-time">${shortDate(att.createdAt)}</span>
+      <span class="att-time">${escapeHtml(shortDate(att.createdAt))}</span>
       ${editing ? '' : `<span class="att-actions">
         ${canEdit ? `<button class="icon-btn" data-a="edit" title="Edit">${ICON.pencil}</button>` : ''}
         <button class="icon-btn danger" data-a="remove" title="Remove">${ICON.trash}</button>

@@ -25,7 +25,15 @@
       const r = (Math.random() * 16) | 0; return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
     }));
   const clone = (x) => (x === undefined ? x : JSON.parse(JSON.stringify(x))); // emulate the JSON-over-HTTP boundary
-  const extname = (name) => { const i = String(name || '').lastIndexOf('.'); return i > 0 ? name.slice(i) : ''; };
+  const safeExtension = (name) => { // as server.js: a short, plain extension, or none
+    const base = String(name || '').split(/[\\/]/).pop();
+    const extension = base.lastIndexOf('.') > 0 ? base.slice(base.lastIndexOf('.') + 1).toLowerCase() : '';
+    return /^[a-z0-9]{1,10}$/.test(extension) ? `.${extension}` : '';
+  };
+  const webURL = (value) => { // as server.js: http(s) links only
+    const text = String(value ?? '').trim();
+    try { return ['http:', 'https:'].includes(new URL(text).protocol) ? text : null; } catch { return null; }
+  };
   const err = (message) => new Error(message);
 
   // --- Storage state (in memory; persisted to IndexedDB) ---------------------
@@ -400,13 +408,14 @@
       let attachment;
       const file = isForm ? body.get('file') : null;
       if (file) {
-        const filename = `${uuid()}${extname(file.name)}`;
+        const filename = `${uuid()}${safeExtension(file.name)}`;
         await putBlob(filename, file);
         attachment = { id: uuid(), type: attachmentType(file.type), filename, originalName: file.name, mimeType: file.type, size: file.size, createdAt: now() };
       } else if (j.type === 'text') {
         attachment = { id: uuid(), type: 'text', content: j.content || '', createdAt: now() };
       } else if (j.type === 'url') {
-        const url2 = (j.url || '').trim(); if (!url2) throw err('url is required');
+        if (!String(j.url ?? '').trim()) throw err('url is required');
+        const url2 = webURL(j.url); if (!url2) throw err('only http and https links can be attached');
         attachment = { id: uuid(), type: 'url', url: url2, title: (j.title || '').trim(), createdAt: now() };
       } else {
         throw err('unsupported attachment');
@@ -426,8 +435,10 @@
       const att = (found.card.attachments || []).find((a) => a.id === seg[4]);
       if (!att) throw err('attachment not found');
       if (method === 'PATCH') {
+        const url2 = att.type === 'url' && typeof j.url === 'string' && j.url.trim() ? webURL(j.url) : undefined;
+        if (url2 === null) throw err('only http and https links can be attached');
         if (att.type === 'text' && typeof j.content === 'string') att.content = j.content;
-        if (att.type === 'url' && typeof j.url === 'string' && j.url.trim()) att.url = j.url.trim();
+        if (url2) att.url = url2;
         if (typeof j.title === 'string') att.title = j.title;
         found.card.updatedAt = now(); await persist(); return att;
       }

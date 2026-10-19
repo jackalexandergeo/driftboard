@@ -159,11 +159,26 @@ function pushTrash(entry) {
 
 // --- Uploads ---------------------------------------------------------------
 
+// A stored file keeps only a short, plain extension (it picks the type it is served with):
+// the rest of the uploaded name is the uploader's to choose, and not fit for a path or a page.
+function safeExtension(name) {
+  const extension = path.extname(String(name || '')).slice(1).toLowerCase();
+  return /^[a-z0-9]{1,10}$/.test(extension) ? `.${extension}` : '';
+}
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
-  filename: (req, file, cb) => cb(null, `${randomUUID()}${path.extname(file.originalname) || ''}`),
+  filename: (req, file, cb) => cb(null, `${randomUUID()}${safeExtension(file.originalname)}`),
 });
 const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
+// A link must be a web link: a javascript: or data: one would run on the board when clicked.
+function webURL(value) {
+  const text = String(value ?? '').trim();
+  try {
+    return ['http:', 'https:'].includes(new URL(text).protocol) ? text : null;
+  } catch {
+    return null;
+  }
+}
 function attachmentType(mimeType) {
   if (mimeType?.startsWith('image/')) return 'image';
   if (mimeType?.startsWith('video/')) return 'video';
@@ -281,7 +296,16 @@ app.use('/uploads', (req, res, next) => {
 });
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'docs'))); // static site (also the GitHub Pages source); marked/purify are vendored under docs/vendor/
-app.use('/uploads', express.static(UPLOADS_DIR));
+// Uploads are served from the board's own origin, where the token lives: an uploaded page or
+// SVG opened in a tab must not run there. Nothing is sniffed, nothing runs (sandbox), and only
+// images and videos show inline; anything else downloads.
+app.use('/uploads', express.static(UPLOADS_DIR, {
+  setHeaders: (res, file) => {
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Content-Security-Policy', "sandbox; frame-ancestors 'none'");
+    if (!/^(image\/(?!svg)|video\/)/.test(express.static.mime.lookup(file))) res.set('Content-Disposition', 'attachment');
+  },
+}));
 
 // ---- Session ----
 app.post('/api/sign-in-codes', (req, res) => {
@@ -528,8 +552,9 @@ app.post('/api/cards/:id/attachments', upload.single('file'), async (req, res) =
   } else if (req.body.type === 'text') {
     attachment = { id: randomUUID(), type: 'text', content: req.body.content || '', createdAt: now() };
   } else if (req.body.type === 'url') {
-    const url = (req.body.url || '').trim();
-    if (!url) return res.status(400).json({ error: 'url is required' });
+    if (!String(req.body.url ?? '').trim()) return res.status(400).json({ error: 'url is required' });
+    const url = webURL(req.body.url);
+    if (!url) return res.status(400).json({ error: 'only http and https links can be attached' });
     attachment = { id: randomUUID(), type: 'url', url, title: (req.body.title || '').trim(), createdAt: now() };
   } else {
     return res.status(400).json({ error: 'unsupported attachment' });
@@ -560,8 +585,10 @@ app.patch('/api/cards/:id/attachments/:attId', (req, res) => {
   if (!found) return res.status(404).json({ error: 'card not found' });
   const att = (found.card.attachments || []).find((a) => a.id === req.params.attId);
   if (!att) return res.status(404).json({ error: 'attachment not found' });
+  const url = att.type === 'url' && typeof req.body.url === 'string' && req.body.url.trim() ? webURL(req.body.url) : undefined;
+  if (url === null) return res.status(400).json({ error: 'only http and https links can be attached' });
   if (att.type === 'text' && typeof req.body.content === 'string') att.content = req.body.content;
-  if (att.type === 'url' && typeof req.body.url === 'string' && req.body.url.trim()) att.url = req.body.url.trim();
+  if (url) att.url = url;
   if (typeof req.body.title === 'string') att.title = req.body.title;
   found.card.updatedAt = now();
   persist();
