@@ -7,7 +7,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.DRIFTBOARD_DATA ? path.resolve(process.env.DRIFTBOARD_DATA) : path.join(__dirname, 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const BOARD_FILE = path.join(DATA_DIR, 'board.json');
 const PORT = process.env.PORT || 4321;

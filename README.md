@@ -123,6 +123,7 @@ anyone who can reach the port can read and change it.
 
 For the local version, everything lives in `data/` (`board.json` plus an
 `uploads/` folder of your media) — copy that folder to back up or move everything.
+To keep it somewhere else, set `DRIFTBOARD_DATA=/path/to/folder`.
 
 ---
 
