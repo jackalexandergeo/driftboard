@@ -19,7 +19,25 @@ const STAGE_TITLES = {
 
 // --- Storage ---------------------------------------------------------------
 
-fs.mkdirSync(UPLOADS_DIR, { recursive: true, mode: 0o700 }); // the board is nobody else's to read
+// The board, its files and its token are nobody else's to read. All that the server makes is
+// private (umask), and so is a data folder that already exists: mkdir's mode only applies to
+// a new one, and earlier versions left data/ open to every user (755, board.json 644).
+process.umask(0o077);
+const myUid = process.getuid?.();
+function makePrivate(file, mode) { // returns how it was
+  const stat = fs.statSync(file);
+  if (myUid !== undefined && stat.uid !== myUid) {
+    console.error(`${file} belongs to another user (uid ${stat.uid}): keep the board in a folder of your own (DRIFTBOARD_DATA)`);
+    process.exit(1);
+  }
+  if ((stat.mode & 0o777) !== mode) fs.chmodSync(file, mode);
+  return stat;
+}
+fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+makePrivate(DATA_DIR, 0o700);
+fs.mkdirSync(UPLOADS_DIR, { recursive: true, mode: 0o700 });
+makePrivate(UPLOADS_DIR, 0o700);
+if (fs.existsSync(BOARD_FILE)) makePrivate(BOARD_FILE, 0o600);
 const now = () => new Date().toISOString();
 
 function makeBinders(titles) {
@@ -160,11 +178,14 @@ function attachmentType(mimeType) {
 // never holds the token. The page itself is public code (it is the GitHub Pages demo too).
 
 function loadToken() {
-  try {
+  if (fs.existsSync(TOKEN_FILE)) {
+    const { mode } = makePrivate(TOKEN_FILE, 0o600); // refuses a token another user wrote
+    if (mode & 0o077) {
+      console.warn(`warning: ${TOKEN_FILE} was open to other users. It is private now, but whoever `
+        + 'read it can still open the board: delete it and restart to make a new token.');
+    }
     const saved = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
     if (saved) return saved;
-  } catch {
-    // first start
   }
   const made = randomBytes(32).toString('base64url');
   fs.writeFileSync(TOKEN_FILE, made + '\n', { mode: 0o600 });
