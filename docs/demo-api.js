@@ -34,7 +34,7 @@
     const text = String(value ?? '').trim();
     try { return ['http:', 'https:'].includes(new URL(text).protocol) ? text : null; } catch { return null; }
   };
-  const err = (message) => new Error(message);
+  const err = (message) => Object.assign(new Error(message), { status: / not found$/.test(message) ? 404 : 400 }); // as the server's replies
 
   // --- Storage state (in memory; persisted to IndexedDB) ---------------------
   let db = null;

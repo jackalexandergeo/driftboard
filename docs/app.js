@@ -1177,14 +1177,28 @@ if (!DEMO) {
 
 // ---------- links to a card ----------
 // #card=<id> opens that card, on whichever board it is (a link from another app, a bookmark).
+// The fragment is cleared once dealt with, so the same link works again and a reload does not
+// reopen the card.
 async function openLinkedCard() {
   const id = new URLSearchParams(location.hash.slice(1)).get('card');
   if (!id || locked) return;
+  let found;
   try {
-    const { workspaceId } = await api('GET', `/api/cards/${encodeURIComponent(id)}`);
-    if (workspaceId !== activeWorkspaceId) await switchWorkspace(workspaceId);
-    openCard(id);
-  } catch (e) { toast('That card is gone: ' + e.message); }
+    found = await api('GET', `/api/cards/${encodeURIComponent(id)}`);
+  } catch (e) {
+    if (e.status === 404) { forgetLink(); toast('That card no longer exists'); }
+    else if (e.status !== 401) toast(`Could not open that card (${e.message}): reload to try again`);
+    return; // locked or unreachable: the link stays for when it works
+  }
+  forgetLink();
+  document.activeElement?.blur(); // saves whatever was being typed
+  closeMenu(); closeBinderEditor();
+  if (found.workspaceId !== activeWorkspaceId) await switchWorkspace(found.workspaceId);
+  else if (!ws.cards.some((c) => c.id === id)) await reloadWorkspace(); // made after this board was drawn
+  openCard(id);
+}
+function forgetLink() {
+  history.replaceState(history.state, '', location.pathname + location.search);
 }
 window.addEventListener('hashchange', () => { openLinkedCard(); });
 
