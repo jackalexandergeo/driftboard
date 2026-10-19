@@ -1,18 +1,15 @@
 import express from 'express';
 import multer from 'multer';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { DATA_DIR, HOST, PORT, TOKEN_FILE, localURL } from './settings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = process.env.DRIFTBOARD_DATA ? path.resolve(process.env.DRIFTBOARD_DATA) : path.join(__dirname, 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const BOARD_FILE = path.join(DATA_DIR, 'board.json');
-const PORT = process.env.PORT || 4321;
-// Only this machine by default: the board has no accounts, so anyone who can reach it can edit it.
-const HOST = process.env.HOST || '127.0.0.1';
 
 const STARTER_BINDERS = ['To Do', 'In Progress', 'Blocked', 'Reviewing', 'Completed'];
 const STAGE_TITLES = {
@@ -22,7 +19,7 @@ const STAGE_TITLES = {
 
 // --- Storage ---------------------------------------------------------------
 
-fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+fs.mkdirSync(UPLOADS_DIR, { recursive: true, mode: 0o700 }); // the board is nobody else's to read
 const now = () => new Date().toISOString();
 
 function makeBinders(titles) {
@@ -150,9 +147,66 @@ function attachmentType(mimeType) {
   return 'file';
 }
 
+// --- Access ----------------------------------------------------------------
+// The board has no accounts: one token, made on first start, opens it. A browser signs in
+// once with the link from `npm run open` and keeps the token in a cookie; scripts send it
+// as a bearer token. The page itself is public code (it is the GitHub Pages demo too).
+
+function loadToken() {
+  try {
+    const saved = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
+    if (saved) return saved;
+  } catch {
+    // first start
+  }
+  const made = randomBytes(32).toString('base64url');
+  fs.writeFileSync(TOKEN_FILE, made + '\n', { mode: 0o600 });
+  return made;
+}
+const TOKEN = loadToken();
+const COOKIE = 'driftboard_token';
+
+function isToken(value) {
+  const given = Buffer.from(String(value || ''));
+  const wanted = Buffer.from(TOKEN);
+  return given.length === wanted.length && timingSafeEqual(given, wanted);
+}
+function requestToken(req) {
+  const bearer = /^Bearer (.+)$/.exec(req.get('Authorization') || '');
+  if (bearer) return bearer[1].trim();
+  const cookie = (req.get('Cookie') || '').split(';').map((part) => part.trim())
+    .find((part) => part.startsWith(COOKIE + '='));
+  return cookie ? decodeURIComponent(cookie.slice(COOKIE.length + 1)) : null;
+}
+
+// The sign-in link: keep the token in a cookie, then drop it from the address bar.
+function signIn(req, res, next) {
+  if (req.method !== 'GET' || req.query.token === undefined) return next();
+  if (!isToken(req.query.token)) return res.status(401).send('That sign-in link is not valid for this board.');
+  res.cookie(COOKIE, TOKEN, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: 365 * 24 * 3600 * 1000 });
+  const url = new URL(req.originalUrl, 'http://board.invalid');
+  url.searchParams.delete('token');
+  res.redirect(303, url.pathname + url.search + url.hash);
+}
+
+function requireToken(req, res, next) {
+  if (!isToken(requestToken(req))) {
+    return res.status(401).json({ error: 'this board is locked: open it with the link from `npm run open`' });
+  }
+  // A page on another local port is the same site, so the cookie alone would let it write.
+  const origin = req.get('Origin');
+  if (req.method !== 'GET' && origin && origin !== `${req.protocol}://${req.get('Host')}`) {
+    return res.status(403).json({ error: 'cross-origin writes are not allowed' });
+  }
+  next();
+}
+
 // --- App -------------------------------------------------------------------
 
 const app = express();
+app.use(signIn);
+app.use('/api', requireToken);
+app.use('/uploads', requireToken);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'docs'))); // static site (also the GitHub Pages source); marked/purify are vendored under docs/vendor/
 app.use('/uploads', express.static(UPLOADS_DIR));
@@ -446,6 +500,7 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, HOST, () => {
-  console.log(`driftboard running at http://${HOST}:${PORT}`);
+  console.log(`driftboard running at ${localURL()}; sign in with: npm run open`);
+  if (process.stdout.isTTY) console.log(`sign-in link: ${localURL(TOKEN)}`);
   console.log(`data dir: ${DATA_DIR}`);
 });

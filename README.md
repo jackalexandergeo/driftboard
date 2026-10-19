@@ -104,7 +104,11 @@ npm install
 npm start
 ```
 
-Then open **http://localhost:4321**. Use a different port with `PORT=5000 npm start`.
+Then, in another terminal, run `npm run open`: it opens the board in your browser
+and signs you in. The board has no accounts; one token, made on first start and kept
+in `data/token`, opens it, and your browser keeps it in a cookie after that first link.
+Scripts can send it as `Authorization: Bearer <token>`. Use a different port with
+`PORT=5000 npm start` (and the same `PORT` for `npm run open`).
 
 The server listens on this machine only (`127.0.0.1`). To reach it from other
 devices, start it with `HOST=0.0.0.0`, but keep in mind the board has no accounts:
