@@ -664,10 +664,16 @@ $('delete-card').innerHTML = ICON.trash;
 function openCard(id) {
   currentCardId = id; descEditing = false; editingAtts.clear();
   const card = currentCard(); if (!card) return;
-  titleInput.value = card.title;
-  $('card-meta').textContent = `Created ${shortDate(card.createdAt)} · Updated ${shortDate(card.updatedAt)}`;
-  renderDescription(); renderAttachments(); updateSortBtn();
+  showCard(card);
   overlay.classList.remove('hidden');
+}
+function showCard(card) {
+  titleInput.value = card.title;
+  showCardMeta(card);
+  renderDescription(); renderAttachments(); updateSortBtn();
+}
+function showCardMeta(card) {
+  $('card-meta').textContent = `Created ${shortDate(card.createdAt)} · Updated ${shortDate(card.updatedAt)}`;
 }
 function closeModal() { overlay.classList.add('hidden'); currentCardId = null; }
 let overlayPressTarget = null;
@@ -1118,6 +1124,14 @@ function busy() {
     || !!openMenuEl || currentBinderId !== null || descEditing || editingAtts.size > 0
     || (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA'));
 }
+// The same data gives the same text, whatever order its keys were set in.
+function stableJSON(value) {
+  return JSON.stringify(value, (key, v) => (v && typeof v === 'object' && !Array.isArray(v)
+    ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v));
+}
+const sameData = (a, b) => stableJSON(a) === stableJSON(b);
+const boardContent = ({ view, ...content }) => content; // where another tab looks is its own business
+const cardContent = (card) => card && { title: card.title, description: card.description, attachments: card.attachments, attSort: card.attSort };
 async function checkForChanges() {
   if (DEMO || locked || checking || document.hidden || busy() || !ws) return;
   checking = true;
@@ -1128,16 +1142,21 @@ async function checkForChanges() {
     const boardGone = !s.workspaces.some((w) => w.id === activeWorkspaceId);
     const { data: fresh, revision: drawn } = await request('GET', `/api/workspaces/${boardGone ? s.activeWorkspaceId : activeWorkspaceId}`);
     if (busy()) { changedElsewhere = true; return; } // the user started something while we asked: next time
+    const tabsChanged = !sameData(s.workspaces, wsList);
     wsList = s.workspaces;
     knownRevision = drawn; // what was drawn, even if older: a server that went back must not redraw forever
     if (boardGone) { showWorkspace(fresh); return; }
-    ws = fresh; renderWorkspace(); renderTabs();
+    if (tabsChanged) renderTabs();
+    // Redraw only what changed: a write elsewhere (another board, another tab saving its view)
+    // must not restart a video, or lose the scroll and selection in the open card.
+    if (sameData(boardContent(fresh), boardContent(ws))) return;
+    const shownCard = currentCard();
+    ws = fresh; renderWorkspace();
     if (currentCardId) {
       const card = currentCard();
       if (!card) { closeModal(); return; }
-      titleInput.value = card.title;
-      $('card-meta').textContent = `Created ${shortDate(card.createdAt)} · Updated ${shortDate(card.updatedAt)}`;
-      renderDescription(); renderAttachments(); updateSortBtn();
+      if (!sameData(cardContent(card), cardContent(shownCard))) showCard(card);
+      else showCardMeta(card); // moved, say: only its dates show that
     }
   } catch (e) {
     changedElsewhere = true; // try again next time
