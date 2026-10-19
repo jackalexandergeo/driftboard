@@ -86,6 +86,10 @@ for your personal use. Instead, [Run it locally](#-run-it-locally).
 - **Light / dark** toggle at the top-right (remembered per browser).
 - **Snap to grid** toggle so cards and binders line up as you drag.
 
+**Live**
+- Changes made in another tab, or by a script through the API, show up within a few
+  seconds; nothing is redrawn while you are dragging, typing or have a menu open.
+
 **Undo**
 - Deleting a card or binder is **undoable** — the toast's **Undo** button or
   **⌘/Ctrl+Z**. The last 40 deletions come back, even after a restart.

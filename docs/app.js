@@ -66,6 +66,7 @@ async function api(method, url, body, isForm) {
   try {
     if (DEMO) return await window.DriftboardDemo.handle(method, url, body, isForm); // browser backend, same shapes
     const res = await fetch(url, opts);
+    noteRevision(res, isWrite);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
       throw new Error(err.error || 'request failed');
@@ -1016,6 +1017,50 @@ document.addEventListener('keydown', (e) => {
     t.blur(); // …then exit; the save-on-blur sees no change, so nothing is written
   }
 }, true);
+
+// ---------- live updates ----------
+// Another tab or a script may change the board. Each response carries the board's revision:
+// a write that moves it one step is this tab's own; anything else means a redraw is due.
+let knownRevision = null;
+let changedElsewhere = false;
+function noteRevision(res, isWrite) {
+  const revision = Number(res.headers.get('X-Board-Revision'));
+  if (!revision) return;
+  if (isWrite && knownRevision !== null && revision !== knownRevision + 1) changedElsewhere = true;
+  if (knownRevision === null || revision > knownRevision) knownRevision = revision;
+}
+// Never redraw under the user's hands: a drag, an open menu or editor, or a field being typed in.
+function busy() {
+  const focused = document.activeElement;
+  return document.body.classList.contains('dragging-card') || !!document.querySelector('.binder-dragging')
+    || !!openMenuEl || currentBinderId !== null || descEditing || editingAtts.size > 0
+    || (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA'));
+}
+async function checkForChanges() {
+  if (DEMO || document.hidden || busy() || !ws) return;
+  const res = await fetch('/api/state').catch(() => null);
+  if (!res || !res.ok) return;
+  const revision = Number(res.headers.get('X-Board-Revision'));
+  if (revision === knownRevision && !changedElsewhere) return;
+  const s = await res.json();
+  if (busy()) return; // the user started something while we asked
+  changedElsewhere = false;
+  wsList = s.workspaces;
+  if (!wsList.some((w) => w.id === activeWorkspaceId)) { await loadWorkspace(s.activeWorkspaceId); return; }
+  await reloadWorkspace(); renderTabs();
+  knownRevision = Math.max(knownRevision, revision);
+  if (currentCardId) {
+    const card = currentCard();
+    if (!card) { closeModal(); return; }
+    titleInput.value = card.title;
+    $('card-meta').textContent = `Created ${shortDate(card.createdAt)} · Updated ${shortDate(card.updatedAt)}`;
+    renderDescription(); renderAttachments(); updateSortBtn();
+  }
+}
+if (!DEMO) {
+  setInterval(() => { checkForChanges().catch(() => {}); }, 3000);
+  document.addEventListener('visibilitychange', () => { checkForChanges().catch(() => {}); });
+}
 
 // ---------- go ----------
 loadState().catch((e) => toast('Failed to load: ' + e.message));

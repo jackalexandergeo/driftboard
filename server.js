@@ -77,9 +77,14 @@ try {
 if (!Array.isArray(state.trash)) state.trash = []; // undo history for deleted cards/binders
 const TRASH_CAP = 40;
 
+// Every change bumps the revision, so an open tab can tell when someone else changed the
+// board. It starts from the clock so a restart never repeats an earlier number.
+let revision = Date.now();
+
 // Serialize writes so overlapping requests can't corrupt the file.
 let writeChain = Promise.resolve();
 function persist() {
+  revision += 1;
   writeChain = writeChain.then(async () => {
     const tmp = BOARD_FILE + '.tmp';
     await fsp.writeFile(tmp, JSON.stringify(state, null, 2));
@@ -206,6 +211,14 @@ function requireToken(req, res, next) {
 const app = express();
 app.use(signIn);
 app.use('/api', requireToken);
+app.use('/api', (req, res, next) => {
+  const json = res.json.bind(res);
+  res.json = (body) => {
+    res.set('X-Board-Revision', String(revision)); // read when sent, after the handler's write
+    return json(body);
+  };
+  next();
+});
 app.use('/uploads', requireToken);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'docs'))); // static site (also the GitHub Pages source); marked/purify are vendored under docs/vendor/
