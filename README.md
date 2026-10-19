@@ -117,8 +117,8 @@ Scripts can send it as `Authorization: Bearer <token>`. Use a different port wit
 `PORT=5000 npm start` (and the same `PORT` for `npm run open`).
 
 The server listens on this machine only (`127.0.0.1`). To reach it from other
-devices, start it with `HOST=0.0.0.0`, but keep in mind the board has no accounts:
-anyone who can reach the port can read and change it.
+devices, start it with `DRIFTBOARD_HOST=0.0.0.0`, but keep in mind the board has no
+accounts: anyone who can reach the port can read and change it.
 
 ---
 
