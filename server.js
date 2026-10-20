@@ -594,14 +594,15 @@ function validButtons(buttons) {
   return Array.isArray(buttons) && buttons.length <= 3 && buttons.every((button) =>
     button && typeof button === 'object' && BUTTON_ID.test(button.id) &&
     typeof button.label === 'string' && button.label.trim() && button.label.length <= 24 &&
-    (button.title === undefined || (typeof button.title === 'string' && button.title.length <= 120)));
+    (button.title === undefined || (typeof button.title === 'string' && button.title.length <= 120)) &&
+    (button.confirm === undefined || (typeof button.confirm === 'string' && button.confirm.trim() && button.confirm.length <= 24)));
 }
 
 app.patch('/api/cards/:id', (req, res) => {
   const found = getCard(req.params.id);
   if (!found) return res.status(404).json({ error: 'card not found' });
   if (req.body.buttons !== undefined && req.body.buttons !== null && !validButtons(req.body.buttons)) {
-    return res.status(400).json({ error: 'buttons: at most 3 of {id: a-z0-9-, label: up to 24 characters, title?}' });
+    return res.status(400).json({ error: 'buttons: at most 3 of {id: a-z0-9-, label: up to 24 characters, title?, confirm?}' });
   }
   if (req.body.pressed !== undefined && req.body.pressed !== null) {
     return res.status(400).json({ error: 'pressed can only be cleared (null); press a button with POST /press' });
@@ -612,7 +613,9 @@ app.patch('/api/cards/:id', (req, res) => {
   if (typeof req.body.attSort === 'string' && ['newest', 'oldest', 'custom'].includes(req.body.attSort)) card.attSort = req.body.attSort;
   if (req.body.buttons !== undefined) {
     if (req.body.buttons && req.body.buttons.length) {
-      card.buttons = req.body.buttons.map(({ id, label, title }) => (title ? { id, label: label.trim(), title } : { id, label: label.trim() }));
+      card.buttons = req.body.buttons.map(({ id, label, title, confirm }) => ({
+        id, label: label.trim(), ...(title ? { title } : {}), ...(confirm ? { confirm: confirm.trim() } : {}),
+      }));
     } else delete card.buttons;
   }
   if (req.body.pressed === null) delete card.pressed;

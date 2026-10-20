@@ -229,6 +229,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
   border: 1px solid var(--binder-color, var(--gray)); background: transparent; color: var(--text); }
 .card-button:hover:not(:disabled) { background: var(--binder-color, var(--gray)); color: var(--bg); }
 .card-button:disabled { opacity: 0.5; cursor: progress; }
+.card-button.confirming, .card-button.confirming:hover { background: var(--red); border-color: var(--red); color: #fff; }
 .card:hover .card-actions, .card:focus-within .card-actions { opacity: 1; }
 .card-act { width: 24px; height: 24px; background: var(--surface); box-shadow: var(--shadow-sm); }
 .card-act svg { width: 14px; height: 14px; }

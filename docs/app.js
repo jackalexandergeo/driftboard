@@ -421,8 +421,15 @@ function cardButtons(card) {
     b.textContent = button.label;
     if (button.title) b.title = button.title;
     if (card.pressed && card.pressed.button === button.id) { b.disabled = true; b.classList.add('pending'); }
+    let armed = null; // a button with `confirm` asks first: one click arms it, a second presses it
     b.addEventListener('click', async (e) => {
       e.stopPropagation(); // not a click on the card, which opens it
+      if (button.confirm && !armed) {
+        b.textContent = button.confirm; b.classList.add('confirming');
+        armed = setTimeout(() => { armed = null; b.textContent = button.label; b.classList.remove('confirming'); }, 4000);
+        return;
+      }
+      clearTimeout(armed); armed = null;
       b.disabled = true; b.classList.add('pending');
       try { await api('POST', `/api/cards/${card.id}/press`, { button: button.id }); await reloadWorkspace(); }
       catch (err) { b.disabled = false; b.classList.remove('pending'); toast(err.message); }
