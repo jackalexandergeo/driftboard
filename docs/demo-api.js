@@ -42,6 +42,25 @@
   let initPromise = null;
   const urlByFilename = new Map(); // filename -> object URL, so fileUrl() stays synchronous
 
+  // An object URL belongs to the page's own origin, and the demo can run on the board's
+  // (?demo=1), where an SVG or a web page opened from one would run its scripts. So a file keeps
+  // its type only when a browser just shows it (a picture, a video); anything else is plain
+  // bytes, which a browser saves instead of opening. An SVG is still drawn on its card, from a
+  // data: URL: opened, that is a document with an origin of its own.
+  const SHOWN_AS_IS = /^(image\/(png|jpeg|gif|webp|bmp|avif|x-icon|vnd\.microsoft\.icon)|video\/[a-z0-9.+-]+)$/i;
+  const opensSafely = (type) => SHOWN_AS_IS.test(type || '');
+  const dataURL = (blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+  async function fileURL(blob) {
+    if (opensSafely(blob.type)) return URL.createObjectURL(blob);
+    if (blob.type === 'image/svg+xml') return dataURL(blob);
+    return URL.createObjectURL(new Blob([blob], { type: 'application/octet-stream' }));
+  }
+
   function makeBinders(titles) {
     return titles.map((title, i) => ({ id: uuid(), title, x: 40 + i * 340, y: 40 }));
   }
@@ -251,7 +270,7 @@
     const t = db.transaction('blobs', 'readwrite');
     t.objectStore('blobs').put({ filename, blob });
     await txDone(t);
-    urlByFilename.set(filename, URL.createObjectURL(blob));
+    urlByFilename.set(filename, await fileURL(blob));
   }
   async function deleteBlob(filename) {
     try { const t = db.transaction('blobs', 'readwrite'); t.objectStore('blobs').delete(filename); await txDone(t); } catch { /* best effort */ }
@@ -267,7 +286,7 @@
       state = rec.value;
       if (!Array.isArray(state.trash)) state.trash = [];
       const blobs = await idbReq(db.transaction('blobs', 'readonly').objectStore('blobs').getAll());
-      for (const b of blobs) urlByFilename.set(b.filename, URL.createObjectURL(b.blob));
+      for (const b of blobs) urlByFilename.set(b.filename, await fileURL(b.blob));
     } else {
       await seed(); // fresh store, or a left-over empty board from before seeding existed
     }
@@ -474,5 +493,5 @@
     await seed(); // restore the preloaded demo board, not an empty one
   }
 
-  window.DriftboardDemo = { handle, fileUrl, reset };
+  window.DriftboardDemo = { handle, fileUrl, opensSafely, reset };
 })();

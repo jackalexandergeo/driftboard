@@ -906,7 +906,11 @@ function attachmentBody(att) {
     return `<a href="${href}" target="_blank" rel="noopener">${escapeHtml(att.title || u)}</a>`;
   }
   const src = escapeHtml(fileUrl(att));
-  if (att.type === 'image') return `<a href="${src}" target="_blank" rel="noopener"><img src="${src}" alt=""></a>`;
+  if (att.type === 'image') {
+    // The demo's files are in this page's own origin: only a plain picture opens in a tab (demo-api.js).
+    const opens = !DEMO || window.DriftboardDemo.opensSafely(att.mimeType);
+    return `<a href="${src}" ${opens ? 'target="_blank" rel="noopener"' : `download="${escapeHtml(att.originalName || '')}"`}><img src="${src}" alt=""></a>`;
+  }
   if (att.type === 'video') return `<video src="${src}" controls></video>`;
   return `<a href="${src}" download="${escapeHtml(att.originalName || '')}">⬇ ${escapeHtml(att.originalName || 'download')}</a> <span style="color:var(--muted);font-size:12px">(${escapeHtml(formatBytes(att.size))})</span>`;
 }
