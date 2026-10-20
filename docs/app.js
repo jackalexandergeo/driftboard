@@ -60,19 +60,19 @@ function endSave() {
 // The board's data needs its token; the page itself is public. `npm run open` opens the board
 // with a one-time code (#code=, or ?code=), which is swapped for the token here. The token goes
 // with every API call as a bearer token, once the server has proved it holds it. It is kept in
-// this tab's session storage, so refreshing the tab keeps the sign-in; the browser drops it when
-// the tab closes, and other tabs do not see it. The price: a page another user of this machine
-// serves at the board's address while the board is down could read it, if this tab is refreshed
-// right then.
+// the browser's local storage for this address and port (not a cookie: a cookie for 127.0.0.1
+// goes to every port on it, where any user of this machine can listen), so refreshes, new tabs
+// and restarts stay signed in. The price: a page another user of this machine serves at the
+// board's own address while the board is down could read it, if the board is opened right then.
 const TOKEN_KEY = 'driftboard-token';
 let token = null;
-try { localStorage.removeItem(TOKEN_KEY); } catch { /* where an earlier version kept it */ }
-try { token = sessionStorage.getItem(TOKEN_KEY); } catch { /* storage blocked: memory only */ }
+try { token = localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY); } catch { /* storage blocked: memory only */ }
+try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* where the previous version kept it */ }
 function keepToken(value) {
   token = value;
   try {
-    if (value) sessionStorage.setItem(TOKEN_KEY, value);
-    else sessionStorage.removeItem(TOKEN_KEY);
+    if (value) localStorage.setItem(TOKEN_KEY, value);
+    else localStorage.removeItem(TOKEN_KEY);
   } catch { /* storage blocked: memory only */ }
 }
 let uploadsKey = '';

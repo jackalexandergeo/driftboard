@@ -124,11 +124,11 @@ minute, and writes a small page, readable only by you, in `data/opening/`, that 
 the browser on to `http://127.0.0.1:4321/#code=…`. The browser is given that page's
 path, never the code: every user of the machine can read the browser's command line,
 and could use a code they read there before the browser does. The page swaps the code
-for the token, keeps the token in that tab's session storage (gone when the tab closes,
-never shared with other tabs) and takes the code out of the address bar. So the token
-never shows up in an address, on a command line or in the browser's history. There are
-no cookies. A tab stays signed in until it is closed, refreshes included; a new tab
-needs `npm run open` (or the app that opened it) again.
+for the token, keeps the token in the browser's local storage for this address and port,
+and takes the code out of the address bar. So the token never shows up in an address, on
+a command line or in the browser's history, and the browser stays signed in: refreshes,
+new tabs and restarts included. There are no cookies: a cookie for 127.0.0.1 goes to
+every port on it, where any user of the machine can listen.
 **A PIN for new tabs.** `npm run set-pin` (in a terminal; it asks twice and shows nothing)
 sets a PIN, and the locked page then asks for it, so a new tab or a bookmark signs in
 without a terminal. Only a slow scrypt hash is kept (`data/pin`, private). Guessing is
@@ -148,10 +148,10 @@ its place, with pages of their own at its address. What that gets them:
   `npm run open` and the page ask for the proof (`GET /api/hello`, below) before every
   call that carries the token. An open tab that gets no proof says "The board went
   away", sends nothing and stops looking for changes, and carries on once the board is
-  back. Your scripts should prove the server too. One exception: a signed-in tab that is
-  refreshed while they hold the port loads their page, and that page can read the tab's
-  session storage, token included. Keep the board running while tabs are open, or close
-  them when you stop it.
+  back. Your scripts should prove the server too. One exception: opening or refreshing
+  the board while they hold the port loads their page, and that page can read the
+  browser's storage for that address, token included. Keep the board running (the
+  systemd unit restarts it), and if it was down, do not open it until it is back.
 - What the page asks for without the token: the proofs, and any uploaded file it loads
   while the board is down, whose link carries the uploads key (below). The key opens
   uploaded files only, and only once the board is back.
