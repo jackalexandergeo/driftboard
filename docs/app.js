@@ -58,13 +58,15 @@ function endSave() {
 
 // ---------- sign-in ----------
 // The board's data needs its token; the page itself is public. `npm run open` opens the board
-// with a one-time code (?code=), which is swapped for the token here. The token stays in this
-// browser's storage for this address and goes with every API call as a bearer token.
-const TOKEN_KEY = 'driftboard-token';
+// with a one-time code (?code=), which is swapped for the token here. The token is kept in this
+// page's memory only and goes with every API call as a bearer token. Not in the browser's
+// storage: while the board is down, another user of this machine can serve a page of their own
+// at its address, and that page could read the storage. So a reload needs a new sign-in.
 let token = null;
-try { token = localStorage.getItem(TOKEN_KEY); } catch { /* no storage: sign in again next time */ }
+try { localStorage.removeItem('driftboard-token'); } catch { /* where the previous version kept it */ }
 let uploadsKey = '';
 let locked = false;
+let away = false;
 
 async function signInWithCode() {
   const address = new URL(location.href);
@@ -79,8 +81,8 @@ async function signInWithCode() {
     toast(res ? 'That sign-in link has expired or was used already: run `npm run open` again' : 'Could not reach the board to sign in');
     return;
   }
-  token = (await res.json()).token;
-  try { localStorage.setItem(TOKEN_KEY, token); } catch { /* signed in for this page only */ }
+  const body = await res.json().catch(() => null);
+  token = typeof body?.token === 'string' ? body.token : null;
 }
 function showLocked() {
   locked = true;
@@ -111,6 +113,30 @@ async function askForProof() {
   }
 }
 
+// The board went away: it stopped, or a call met an error, an answer that is not the board's, or
+// a 401. Until a server proves itself again, nothing goes out with the token and the board is not
+// checked for changes; the proof is asked for every few seconds.
+const AWAY_RETRY = 3000;
+let awayTimer = null;
+const awayError = () => Object.assign(new Error('the board went away: nothing is sent until it is back'), { status: 0, away: true });
+function goAway() {
+  if (away) return;
+  away = true;
+  $('away').classList.remove('hidden');
+  awayTimer = setInterval(comeBack, AWAY_RETRY);
+}
+async function comeBack() {
+  try { await proveServer(); } catch { return; }
+  if (!away) return;
+  away = false;
+  clearInterval(awayTimer);
+  $('away').classList.add('hidden');
+  if (!ws) { start(); return; } // it went away before the board was first drawn
+  changedElsewhere = true; // whatever changed meanwhile
+  checkForChanges().catch(() => {});
+  openLinkedCard();
+}
+
 // ---------- api ----------
 // The reply, and the board revision it was sent at (none in the demo).
 async function request(method, url, body, isForm) {
@@ -122,17 +148,17 @@ async function request(method, url, body, isForm) {
   try {
     if (DEMO) return { data: await window.DriftboardDemo.handle(method, url, body, isForm), revision: null }; // browser backend, same shapes
     if (!token) { showLocked(); throw Object.assign(new Error('this board is locked: open it with `npm run open`'), { status: 401 }); }
-    await proveServer();
+    if (away) throw awayError();
+    try { await proveServer(); } catch { goAway(); throw awayError(); }
     opts.headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(url, opts);
+    let res;
+    try { res = await fetch(url, opts); } catch { goAway(); throw awayError(); }
+    if (res.status === 401) { goAway(); throw awayError(); }
+    const answer = res.status === 204 ? null : await res.json().catch(() => undefined);
+    if (answer === undefined) { goAway(); throw awayError(); } // not the board's answer
     if (isWrite) noteWrite(res);
-    if (res.status === 401) showLocked();
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw Object.assign(new Error(err.error || 'request failed'), { status: res.status });
-    }
-    const data = res.status === 204 ? null : await res.json();
-    return { data, revision: Number(res.headers.get('X-Board-Revision')) || null };
+    if (!res.ok) throw Object.assign(new Error(answer?.error || 'request failed'), { status: res.status });
+    return { data: answer, revision: Number(res.headers.get('X-Board-Revision')) || null };
   } finally {
     if (isWrite) endSave();
   }
@@ -179,6 +205,14 @@ function shortDate(iso) {
   try { return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
   catch { return ''; }
 }
+// A link in a note opens in a new tab: followed in this one, it would take the sign-in with it.
+// A link within the board (#card=…) stays.
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName === 'A' && node.hasAttribute('href') && !node.getAttribute('href').startsWith('#')) {
+    node.setAttribute('target', '_blank');
+    node.setAttribute('rel', 'noopener noreferrer');
+  }
+});
 function renderMarkdown(text) { return DOMPurify.sanitize(marked.parse(text || '', { breaks: true })); }
 function stripMd(s) {
   return String(s || '')
@@ -1158,7 +1192,7 @@ const sameData = (a, b) => stableJSON(a) === stableJSON(b);
 const boardContent = ({ view, ...content }) => content; // where another tab looks is its own business
 const cardContent = (card) => card && { title: card.title, description: card.description, attachments: card.attachments, attSort: card.attSort };
 async function checkForChanges() {
-  if (DEMO || locked || checking || document.hidden || busy() || !ws) return;
+  if (DEMO || locked || away || checking || document.hidden || busy() || !ws) return;
   checking = true;
   try {
     const { data: s, revision } = await request('GET', '/api/state');
@@ -1206,14 +1240,14 @@ if (!DEMO) {
 // reopen the card.
 async function openLinkedCard() {
   const id = new URLSearchParams(location.hash.slice(1)).get('card');
-  if (!id || locked) return;
+  if (!id || locked || away) return;
   let found;
   try {
     found = await api('GET', `/api/cards/${encodeURIComponent(id)}`);
   } catch (e) {
     if (e.status === 404) { forgetLink(); toast('That card no longer exists'); }
-    else if (e.status !== 401) toast(`Could not open that card (${e.message}): reload to try again`);
-    return; // locked or unreachable: the link stays for when it works
+    else if (e.status !== 401 && !e.away) toast(`Could not open that card (${e.message}): reload to try again`);
+    return; // locked or away: the link stays for when it works
   }
   forgetLink();
   document.activeElement?.blur(); // saves whatever was being typed
@@ -1228,4 +1262,7 @@ function forgetLink() {
 window.addEventListener('hashchange', () => { openLinkedCard(); });
 
 // ---------- go ----------
-signInWithCode().then(loadState).then(openLinkedCard).catch((e) => { if (!locked) toast('Failed to load: ' + e.message); });
+function start() {
+  return loadState().then(openLinkedCard).catch((e) => { if (!locked && !away) toast('Failed to load: ' + e.message); });
+}
+signInWithCode().then(start);

@@ -120,18 +120,29 @@ The board has no accounts. On first start the server makes a random token and ke
 it in `data/token`, readable only by you; whoever has the token can read and change
 the board. `npm run open` asks the server for a sign-in code that works once, for a
 minute, and opens `http://127.0.0.1:4321/?code=…`; the page swaps the code for the
-token, keeps it in the browser's storage and takes the code out of the address bar.
-So the token never shows up in an address, in the browser's command line (which every
-user of the machine can read) or in its history. There are no cookies.
-
-While the board is down, any user of the machine can listen on its port. So nothing
-sends the token to a server that has not first proved it holds it: `npm run open` and
-the page ask for the proof (`GET /api/hello`, below) before every call that carries the
-token, and a server that cannot give it is sent nothing. Your scripts should do the same.
-
-The browser keeps the sign-in per address: `http://127.0.0.1:4321` and
-`http://localhost:4321` are different sites to it, so each needs its own sign-in.
+token, keeps it in its memory only and takes the code out of the address bar. So the
+token never shows up in an address, in the browser's command line (which every user of
+the machine can read), in its history or in its storage. There are no cookies. A page
+stays signed in for as long as it is open: after a reload, or in a new tab, open the
+board again with `npm run open` (or the app that opened it).
 `npm run open -- --print` prints the link without opening a browser.
+
+While the board is down, any user of the machine can listen on its port and answer in
+its place, with pages of their own at its address. What that gets them:
+
+- Not the token. Nothing sends it to a server that has not first proved it holds it:
+  `npm run open` and the page ask for the proof (`GET /api/hello`, below) before every
+  call that carries the token. An open tab that gets no proof says "The board went
+  away", sends nothing and stops looking for changes, and carries on once the board is
+  back. Their pages find no token in the browser's storage either. Your scripts should
+  prove the server too.
+- What the page asks for without the token: the proofs, and any uploaded file it loads
+  while the board is down, whose link carries the uploads key (below). The key opens
+  uploaded files only, and only once the board is back.
+- Whatever you type into their page. A reloaded or restored tab, or a bookmark, can show
+  their page in place of the board, looking like it. The board's own page, until it is
+  opened with `npm run open`, only ever says it is locked; `npm run open` checks the
+  server before it opens anything.
 
 Scripts send the token as `Authorization: Bearer <token>` on every `/api` call:
 
