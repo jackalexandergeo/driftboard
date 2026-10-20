@@ -805,9 +805,18 @@ function openCard(id) {
   const card = currentCard(); if (!card) return;
   showCard(card);
   overlay.classList.remove('hidden');
+  fitTitle(); // only measurable once the modal shows
 }
+// The title is a one-line value in a box as tall as its wrapped text.
+function fitTitle() { titleInput.style.height = 'auto'; titleInput.style.height = `${titleInput.scrollHeight}px`; }
+titleInput.addEventListener('input', () => {
+  if (/\n/.test(titleInput.value)) titleInput.value = titleInput.value.replace(/\s*\n\s*/g, ' ');
+  fitTitle();
+});
+titleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); titleInput.blur(); } });
 function showCard(card) {
   titleInput.value = card.title;
+  fitTitle();
   showCardMeta(card);
   renderDescription(); renderAttachments(); updateSortBtn();
 }
