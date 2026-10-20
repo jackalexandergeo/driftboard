@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import net from 'node:net';
 import path from 'node:path';
 import { DATA_DIR, HOST, OPENING_DIR, PORT, TOKEN_FILE, TOKEN_FORMAT_FILE, localURL } from './settings.js';
 
@@ -281,6 +282,21 @@ function useSignInCode(code) {
 // --- App -------------------------------------------------------------------
 
 const app = express();
+// A page on another site can point a name of its own at this machine (DNS rebinding) and then
+// reach the board as its own origin. So the board answers only to the names it goes by:
+// 127.0.0.1, localhost, [::1] and DRIFTBOARD_HOST, and, when it listens on every address, to
+// any IP address (other devices reach it by this machine's). A rebinding page uses a name.
+const listensEverywhere = HOST === '0.0.0.0' || HOST === '::';
+const KNOWN_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', net.isIPv6(HOST) ? `[${HOST.toLowerCase()}]` : HOST.toLowerCase()]);
+function knownHost(header) {
+  const name = /^(\[[^\]]+\]|[^:]+)(:\d+)?$/.exec(String(header ?? '').trim().toLowerCase())?.[1]; // without the port
+  if (!name) return false;
+  return KNOWN_HOSTS.has(name) || (listensEverywhere && net.isIP(name.replace(/^\[|\]$/g, '')) !== 0);
+}
+app.use((req, res, next) => {
+  if (knownHost(req.get('Host'))) return next();
+  res.status(421).type('text/plain').send(`this board answers only at its own address, such as ${localURL()}`);
+});
 // Earlier versions kept the token in a cookie, driftboard_token, for a year. A cookie for
 // 127.0.0.1 goes to every port on it, where any user of this machine can listen: while a
 // browser still sends one, it is told to drop it (it was set for / or for /api).

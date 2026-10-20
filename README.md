@@ -180,7 +180,11 @@ Scripts send the token as `Authorization: Bearer <token>` on every `/api` call:
 
 The server listens on this machine only (`127.0.0.1`). To reach it from other
 devices, start it with `DRIFTBOARD_HOST=0.0.0.0` and sign each browser in with a link
-from `npm run open -- --print`, with this machine's address in place of `127.0.0.1`.
+from `npm run open -- --print`, with this machine's IP address in place of `127.0.0.1`.
+The board answers only to the names it goes by (`127.0.0.1`, `localhost`, `[::1]` and
+`DRIFTBOARD_HOST`) and, when it listens on every address, to any IP address: a page
+from elsewhere that points a name of its own at this machine (DNS rebinding) gets a 421.
+To use a name, start the server with that name as `DRIFTBOARD_HOST`.
 Keep in mind that the board speaks plain HTTP: the token, and everything on the board,
 travel unencrypted over the network, so anyone who can watch that network can take
 the token and with it the board. Put an HTTPS proxy in front of it, or keep it local.
