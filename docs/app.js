@@ -222,7 +222,17 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     node.setAttribute('rel', 'noopener noreferrer');
   }
 });
-function renderMarkdown(text) { return DOMPurify.sanitize(marked.parse(text || '', { breaks: true })); }
+// Notes can be written by scripts that copy text in from elsewhere, so they get plain HTML only:
+// no SVG or MathML (where sanitizer bypasses tend to be found), no <style> to restyle the whole
+// board, no <form> to send what is typed elsewhere, no style attribute to lay a look-alike over
+// the board, and ids and names prefixed so they cannot stand in for the page's own elements.
+const NOTE_HTML = {
+  USE_PROFILES: { html: true },
+  FORBID_TAGS: ['style', 'form'],
+  FORBID_ATTR: ['style'],
+  SANITIZE_NAMED_PROPS: true,
+};
+function renderMarkdown(text) { return DOMPurify.sanitize(marked.parse(text || '', { breaks: true }), NOTE_HTML); }
 function stripMd(s) {
   return String(s || '')
     .replace(/!\[.*?\]\(.*?\)/g, '')            // images
