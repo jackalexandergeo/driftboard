@@ -58,13 +58,23 @@ function endSave() {
 
 // ---------- sign-in ----------
 // The board's data needs its token; the page itself is public. `npm run open` opens the board
-// with a one-time code (#code=, or ?code=), which is swapped for the token here. The token is
-// kept in this page's memory only and goes with every API call as a bearer token. Not in the
-// browser's storage: while the board is down, another user of this machine can serve a page of
-// their own at its address, and that page could read the storage. So a reload needs a new
-// sign-in.
+// with a one-time code (#code=, or ?code=), which is swapped for the token here. The token goes
+// with every API call as a bearer token, once the server has proved it holds it. It is kept in
+// this tab's session storage, so refreshing the tab keeps the sign-in; the browser drops it when
+// the tab closes, and other tabs do not see it. The price: a page another user of this machine
+// serves at the board's address while the board is down could read it, if this tab is refreshed
+// right then.
+const TOKEN_KEY = 'driftboard-token';
 let token = null;
-try { localStorage.removeItem('driftboard-token'); } catch { /* where the previous version kept it */ }
+try { localStorage.removeItem(TOKEN_KEY); } catch { /* where an earlier version kept it */ }
+try { token = sessionStorage.getItem(TOKEN_KEY); } catch { /* storage blocked: memory only */ }
+function keepToken(value) {
+  token = value;
+  try {
+    if (value) sessionStorage.setItem(TOKEN_KEY, value);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch { /* storage blocked: memory only */ }
+}
 let uploadsKey = '';
 let locked = false;
 let away = false;
@@ -92,9 +102,10 @@ async function signInWithCode(code) {
     return;
   }
   const body = await res.json().catch(() => null);
-  token = typeof body?.token === 'string' ? body.token : null;
+  keepToken(typeof body?.token === 'string' ? body.token : null);
 }
 function showLocked() {
+  keepToken(null);   // a token the board refused is no use after a refresh either
   locked = true;
   $('locked').classList.remove('hidden');
 }

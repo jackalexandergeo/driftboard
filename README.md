@@ -124,11 +124,11 @@ minute, and writes a small page, readable only by you, in `data/opening/`, that 
 the browser on to `http://127.0.0.1:4321/#code=…`. The browser is given that page's
 path, never the code: every user of the machine can read the browser's command line,
 and could use a code they read there before the browser does. The page swaps the code
-for the token, keeps the token in its memory only and takes the code out of the
-address bar. So the token never shows up in an address, on a command line, in the
-browser's history or in its storage. There are no cookies. A page stays signed in for
-as long as it is open: after a reload, or in a new tab, open the board again with
-`npm run open` (or the app that opened it).
+for the token, keeps the token in that tab's session storage (gone when the tab closes,
+never shared with other tabs) and takes the code out of the address bar. So the token
+never shows up in an address, on a command line or in the browser's history. There are
+no cookies. A tab stays signed in until it is closed, refreshes included; a new tab
+needs `npm run open` (or the app that opened it) again.
 `npm run open -- --print` prints the link (`http://127.0.0.1:4321/#code=…`) without
 opening a browser. (A browser that cannot read files in the data folder, such as some
 sandboxed ones, needs the printed link.)
@@ -140,8 +140,10 @@ its place, with pages of their own at its address. What that gets them:
   `npm run open` and the page ask for the proof (`GET /api/hello`, below) before every
   call that carries the token. An open tab that gets no proof says "The board went
   away", sends nothing and stops looking for changes, and carries on once the board is
-  back. Their pages find no token in the browser's storage either. Your scripts should
-  prove the server too.
+  back. Your scripts should prove the server too. One exception: a signed-in tab that is
+  refreshed while they hold the port loads their page, and that page can read the tab's
+  session storage, token included. Keep the board running while tabs are open, or close
+  them when you stop it.
 - What the page asks for without the token: the proofs, and any uploaded file it loads
   while the board is down, whose link carries the uploads key (below). The key opens
   uploaded files only, and only once the board is back.
