@@ -90,7 +90,8 @@ for your personal use. Instead, [Run it locally](#-run-it-locally).
 - Changes made in another tab, or by a script through the API, show up within a few
   seconds; nothing is redrawn while you are dragging, typing or have a menu open.
 - **Link to a card** with `#card=<card id>` at the end of the board's address: it opens
-  that card on whichever board it is.
+  that card on whichever board it is, in a tab that is signed in. A link for a new tab
+  needs a sign-in code too: `#code=<code>&card=<card id>` (see [Signing in](#signing-in)).
 
 **Undo**
 - Deleting a card or binder is **undoable** — the toast's **Undo** button or
@@ -125,9 +126,9 @@ path, never the code: every user of the machine can read the browser's command l
 and could use a code they read there before the browser does. The page swaps the code
 for the token, keeps the token in its memory only and takes the code out of the
 address bar. So the token never shows up in an address, on a command line, in the
-browser's history or in its storage. There are no cookies. A page
-stays signed in for as long as it is open: after a reload, or in a new tab, open the
-board again with `npm run open` (or the app that opened it).
+browser's history or in its storage. There are no cookies. A page stays signed in for
+as long as it is open: after a reload, or in a new tab, open the board again with
+`npm run open` (or the app that opened it).
 `npm run open -- --print` prints the link (`http://127.0.0.1:4321/#code=…`) without
 opening a browser. (A browser that cannot read files in the data folder, such as some
 sandboxed ones, needs the printed link.)
@@ -184,7 +185,8 @@ from `npm run open -- --print`, with this machine's IP address in place of `127.
 The board answers only to the names it goes by (`127.0.0.1`, `localhost`, `[::1]` and
 `DRIFTBOARD_HOST`) and, when it listens on every address, to any IP address: a page
 from elsewhere that points a name of its own at this machine (DNS rebinding) gets a 421.
-To use a name, start the server with that name as `DRIFTBOARD_HOST`.
+To use a name, start the server with that name as `DRIFTBOARD_HOST`; a proxy in front
+of the board must send it one of these names as `Host`.
 Keep in mind that the board speaks plain HTTP: the token, and everything on the board,
 travel unencrypted over the network, so anyone who can watch that network can take
 the token and with it the board. Put an HTTPS proxy in front of it, or keep it local.
