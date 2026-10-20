@@ -273,7 +273,21 @@ app.use('/api', (req, res, next) => {
   next();
 }, refuseForeignWrites);
 
-// Swap a sign-in code for the token: the one call that needs no token.
+// Prove this server holds the token, so a client can tell it from another program listening on
+// its port (any user of this machine can, while the board is down) before it sends the token.
+// The proof is an HMAC of the client's fresh nonce keyed with the token: only a holder of the
+// token can make it, and it says nothing about the token. Its message never equals `uploads`,
+// so it cannot be used to make the uploads key either.
+const helloProof = (nonce) => createHmac('sha256', TOKEN).update(`driftboard-hello:${nonce}`).digest('hex');
+app.get('/api/hello', (req, res) => {
+  const { nonce } = req.query;
+  if (typeof nonce !== 'string' || !/^[0-9a-f]{16,128}$/i.test(nonce)) {
+    return res.status(400).json({ error: 'nonce must be 16 to 128 hex characters' });
+  }
+  res.json({ proof: helloProof(nonce) });
+});
+
+// Swap a sign-in code for the token: with the hello, the only calls that need no token.
 app.post('/api/session', express.json({ limit: '4kb' }), (req, res) => {
   if (!useSignInCode(req.body?.code)) {
     return res.status(401).json({ error: 'that sign-in code is not valid (each works once, for a minute): run `npm run open` again' });

@@ -124,10 +124,10 @@ token, keeps it in the browser's storage and takes the code out of the address b
 So the token never shows up in an address, in the browser's command line (which every
 user of the machine can read) or in its history. There are no cookies.
 
-`npm run open` makes sure the port is yours before it sends the token. An open tab and
-your scripts cannot: if they keep calling the board after it stops, another user who
-listens on its port would receive the token. So stop them with the board, or keep the
-board running (as a service, say).
+While the board is down, any user of the machine can listen on its port. So nothing
+sends the token to a server that has not first proved it holds it: `npm run open` and
+the page ask for the proof (`GET /api/hello`, below) before every call that carries the
+token, and a server that cannot give it is sent nothing. Your scripts should do the same.
 
 The browser keeps the sign-in per address: `http://127.0.0.1:4321` and
 `http://localhost:4321` are different sites to it, so each needs its own sign-in.
@@ -135,6 +135,15 @@ The browser keeps the sign-in per address: `http://127.0.0.1:4321` and
 
 Scripts send the token as `Authorization: Bearer <token>` on every `/api` call:
 
+- Never put the token on a command line: `curl -H "Authorization: Bearer $(cat data/token)"`
+  shows it to every user of the machine, who can list the command lines of all processes.
+  Read it from `data/token` in the script itself, or keep the header in a file only you can
+  read and pass that with `curl -H @file`.
+- First make sure the server is the board: `GET /api/hello?nonce=<nonce>`, with 16 to 128
+  fresh random hex characters, needs no token and answers `{"proof": …}`, the HMAC-SHA256
+  of `driftboard-hello:<nonce>` keyed with the token, in hex. Send the token only if the
+  proof is right, and on the same connection if you can (`open.js` shows how): another
+  program can take the port between two connections.
 - `POST /api/sign-in-codes` returns `{"code": …, "expiresAt": …}`: open
   `http://127.0.0.1:4321/?code=<code>` to sign a browser in (add `#card=<id>` to open a
   card once signed in).

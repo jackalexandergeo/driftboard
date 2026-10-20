@@ -3,8 +3,10 @@
 // user on this machine, and its history keeps the address. `--print` only prints the link
 // (for a browser on another device, or with no desktop).
 import { execFile } from 'node:child_process';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import dns from 'node:dns/promises';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import { TOKEN_FILE, localURL } from './settings.js';
@@ -20,8 +22,8 @@ const board = localURL();
 const sameSettings = 'run this with the same DRIFTBOARD_DATA, DRIFTBOARD_HOST and PORT as the server';
 
 // While the board is down, any user of this machine can listen on its port, and would be sent
-// the token. So the token only goes to a port this user listens on. Linux tells who listens
-// in /proc/net/tcp; elsewhere the check is skipped.
+// the token. A first look: Linux tells who listens in /proc/net/tcp (elsewhere this is skipped).
+// It only names who listened a moment ago; what decides is the server's proof, below.
 const canonical = (ip) => (net.isIPv6(ip) ? new URL(`http://[${ip}]/`).hostname.slice(1, -1) : ip);
 function procAddress(hex) { // each 32-bit word is in the machine's byte order
   const bytes = Buffer.from(hex, 'hex');
@@ -53,21 +55,65 @@ if (typeof process.getuid === 'function') {
     process.exit(1);
   }
 }
-let response;
-try {
-  response = await fetch(new URL('api/sign-in-codes', board), {
-    method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000),
+
+// The server proves it holds the token (GET /api/hello) before it is sent the token, and the
+// token goes on the very connection that proof came over: a connection cannot change hands, but
+// the port can, between two connections. So this agent makes one connection and never another.
+class OneConnection extends http.Agent {
+  createConnection(options, callback) {
+    if (this.connected) return callback(new Error('the board closed the connection it proved itself on'));
+    this.connected = true;
+    return super.createConnection(options, callback);
+  }
+}
+const agent = new OneConnection({ keepAlive: true, maxSockets: 1 });
+function ask(method, pathname, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.request(new URL(pathname, board), { method, headers, agent, signal: AbortSignal.timeout(10000) }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        let body = null;
+        try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { /* not JSON: not the board */ }
+        resolve({ status: response.statusCode, body });
+      });
+      response.on('error', reject);
+    });
+    request.on('error', reject);
+    request.end();
   });
+}
+function fail(message) {
+  console.error(message);
+  agent.destroy();
+  process.exit(1);
+}
+
+const nonce = randomBytes(32).toString('hex');
+let hello;
+try {
+  hello = await ask('GET', `api/hello?nonce=${nonce}`);
 } catch (err) {
-  console.error(`could not reach the board at ${board} (${err.cause?.code || err.message}): is it running? ${sameSettings}`);
-  process.exit(1);
+  fail(`could not reach the board at ${board} (${err.cause?.code || err.code || err.message}): is it running? ${sameSettings}`);
 }
-if (!response.ok) {
-  console.error(`the board at ${board} did not take the token in ${TOKEN_FILE} (HTTP ${response.status}): ${sameSettings}`);
-  process.exit(1);
+const proof = Buffer.from(typeof hello.body?.proof === 'string' ? hello.body.proof : '');
+const expected = Buffer.from(createHmac('sha256', token).update(`driftboard-hello:${nonce}`).digest('hex'));
+if (hello.status !== 200 || proof.length !== expected.length || !timingSafeEqual(proof, expected)) {
+  fail(`the server at ${board} could not prove it holds the token in ${TOKEN_FILE} (HTTP ${hello.status}), so it was not sent the token. `
+    + `It is another program, or a board with another token: ${sameSettings}`);
 }
-const { code } = await response.json();
-const url = `${board}?code=${encodeURIComponent(code)}`;
+
+let codes;
+try {
+  codes = await ask('POST', 'api/sign-in-codes', { Authorization: `Bearer ${token}` });
+} catch (err) {
+  fail(`the board at ${board} went away before it was asked for a sign-in code (${err.cause?.code || err.code || err.message}): try again`);
+}
+agent.destroy();
+if (codes.status !== 201 || typeof codes.body?.code !== 'string') {
+  fail(`the board at ${board} gave no sign-in code (HTTP ${codes.status}): ${sameSettings}`);
+}
+const url = `${board}?code=${encodeURIComponent(codes.body.code)}`;
 console.log(url);
 if (!process.argv.includes('--print')) {
   const opener = { darwin: 'open', win32: 'explorer' }[process.platform] || 'xdg-open';

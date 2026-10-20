@@ -87,6 +87,30 @@ function showLocked() {
   $('locked').classList.remove('hidden');
 }
 
+// While the board is down, any user of this machine can listen on its port, and a call from
+// this page would hand them the token. So no call carries it before the server has proved it
+// holds the token: asked with a fresh nonce, it answers HMAC-SHA256(token, "driftboard-hello:" +
+// nonce), which only a holder of the token can make and which says nothing about it. A browser
+// cannot keep a call on the connection that proof came over, so the proof comes right before
+// each call; calls made while one is on its way share it.
+let proving = null;
+function proveServer() {
+  if (!proving) proving = askForProof().finally(() => { proving = null; });
+  return proving;
+}
+async function askForProof() {
+  const nonce = [...crypto.getRandomValues(new Uint8Array(32))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  const expected = window.DriftboardHMAC(token, `driftboard-hello:${nonce}`);
+  let proof = null;
+  try {
+    const res = await fetch(`/api/hello?nonce=${nonce}`, { cache: 'no-store' });
+    if (res.ok) proof = (await res.json()).proof;
+  } catch { /* not reached, or not the board's answer */ }
+  if (proof !== expected) {
+    throw Object.assign(new Error('the server at this address could not prove it is this board, so it was not sent anything'), { status: 0 });
+  }
+}
+
 // ---------- api ----------
 // The reply, and the board revision it was sent at (none in the demo).
 async function request(method, url, body, isForm) {
@@ -98,6 +122,7 @@ async function request(method, url, body, isForm) {
   try {
     if (DEMO) return { data: await window.DriftboardDemo.handle(method, url, body, isForm), revision: null }; // browser backend, same shapes
     if (!token) { showLocked(); throw Object.assign(new Error('this board is locked: open it with `npm run open`'), { status: 401 }); }
+    await proveServer();
     opts.headers.Authorization = `Bearer ${token}`;
     const res = await fetch(url, opts);
     if (isWrite) noteWrite(res);
