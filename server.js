@@ -5,7 +5,7 @@ import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { DATA_DIR, HOST, PORT, TOKEN_FILE, localURL } from './settings.js';
+import { DATA_DIR, HOST, OPENING_DIR, PORT, TOKEN_FILE, localURL } from './settings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
@@ -38,6 +38,11 @@ makePrivate(DATA_DIR, 0o700);
 fs.mkdirSync(UPLOADS_DIR, { recursive: true, mode: 0o700 });
 makePrivate(UPLOADS_DIR, 0o700);
 if (fs.existsSync(BOARD_FILE)) makePrivate(BOARD_FILE, 0o600);
+// Sign-in pages left by `npm run open`: the codes in them died with the last run.
+if (fs.existsSync(OPENING_DIR)) {
+  makePrivate(OPENING_DIR, 0o700);
+  for (const name of fs.readdirSync(OPENING_DIR)) fs.rmSync(path.join(OPENING_DIR, name), { force: true, recursive: true });
+}
 const now = () => new Date().toISOString();
 
 function makeBinders(titles) {

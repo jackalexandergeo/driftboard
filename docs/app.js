@@ -58,7 +58,7 @@ function endSave() {
 
 // ---------- sign-in ----------
 // The board's data needs its token; the page itself is public. `npm run open` opens the board
-// with a one-time code (?code=), which is swapped for the token here. The token is kept in this
+// with a one-time code (#code=, or ?code=), which is swapped for the token here. The token is kept in this
 // page's memory only and goes with every API call as a bearer token. Not in the browser's
 // storage: while the board is down, another user of this machine can serve a page of their own
 // at its address, and that page could read the storage. So a reload needs a new sign-in.
@@ -68,12 +68,21 @@ let uploadsKey = '';
 let locked = false;
 let away = false;
 
-async function signInWithCode() {
+// The code comes in the fragment (#code=…, also #code=…&card=…), which no request carries, or
+// in the query (?code=…). It goes out of the address bar, and so out of a bookmark; #card= stays.
+function takeSignInCode() {
   const address = new URL(location.href);
-  const code = address.searchParams.get('code');
+  const fragment = new URLSearchParams(address.hash.slice(1));
+  const code = fragment.get('code') || address.searchParams.get('code');
+  if (!code) return null;
+  fragment.delete('code');
+  address.searchParams.delete('code');
+  const hash = fragment.toString();
+  history.replaceState(history.state, '', address.pathname + address.search + (hash ? `#${hash}` : ''));
+  return code;
+}
+async function signInWithCode(code) {
   if (DEMO || !code) return;
-  address.searchParams.delete('code'); // out of the address bar (and so out of a bookmark); #card= stays
-  history.replaceState(history.state, '', address.pathname + address.search + address.hash);
   const res = await fetch('/api/session', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
   }).catch(() => null);
@@ -1259,10 +1268,22 @@ async function openLinkedCard() {
 function forgetLink() {
   history.replaceState(history.state, '', location.pathname + location.search);
 }
-window.addEventListener('hashchange', () => { openLinkedCard(); });
+// A sign-in link put into a tab already at this address changes only the fragment: no reload.
+window.addEventListener('hashchange', async () => {
+  const code = takeSignInCode();
+  if (code && !token) {
+    await signInWithCode(code);
+    if (!token) return;
+    locked = false;
+    $('locked').classList.add('hidden');
+    start();
+    return;
+  }
+  openLinkedCard();
+});
 
 // ---------- go ----------
 function start() {
   return loadState().then(openLinkedCard).catch((e) => { if (!locked && !away) toast('Failed to load: ' + e.message); });
 }
-signInWithCode().then(start);
+signInWithCode(takeSignInCode()).then(start);

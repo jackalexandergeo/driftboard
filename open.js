@@ -1,7 +1,10 @@
 // `npm run open`: open this board in the default browser, signed in. The browser gets a
-// one-time sign-in code, never the token: a browser's command line can be read by every
-// user on this machine, and its history keeps the address. `--print` only prints the link
-// (for a browser on another device, or with no desktop).
+// one-time sign-in code, never the token, and not on its command line either: every user of
+// this machine can read command lines, and a code read there can be used before the browser
+// uses it. The browser is given the path of a small page, readable only by this user, that
+// sends it on to the board with the code in the fragment (#code=), which no request carries.
+// `--print` prints the board's link instead (for a browser on another device, or with no
+// desktop).
 import { execFile } from 'node:child_process';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import dns from 'node:dns/promises';
@@ -9,7 +12,9 @@ import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
-import { TOKEN_FILE, localURL } from './settings.js';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { OPENING_DIR, TOKEN_FILE, localURL } from './settings.js';
 
 let token;
 try {
@@ -113,9 +118,44 @@ agent.destroy();
 if (codes.status !== 201 || typeof codes.body?.code !== 'string') {
   fail(`the board at ${board} gave no sign-in code (HTTP ${codes.status}): ${sameSettings}`);
 }
-const url = `${board}?code=${encodeURIComponent(codes.body.code)}`;
-console.log(url);
-if (!process.argv.includes('--print')) {
-  const opener = { darwin: 'open', win32: 'explorer' }[process.platform] || 'xdg-open';
-  execFile(opener, [url], (err) => { if (err) console.error(`could not open a browser (${err.message}); the link above works once, for a minute`); });
+const url = `${board}#code=${encodeURIComponent(codes.body.code)}`;
+if (process.argv.includes('--print')) {
+  console.log(url);
+  process.exit(0);
 }
+
+// The page that takes the browser to the board. It lives in opening/ (0700) in the data folder,
+// as 0600; one older than two minutes holds a dead code and goes (the server clears them all
+// when it starts).
+const OPENING_LIFETIME = 2 * 60 * 1000;
+function openingFolder() {
+  fs.mkdirSync(OPENING_DIR, { recursive: true, mode: 0o700 });
+  const stat = fs.lstatSync(OPENING_DIR);
+  if (!stat.isDirectory() || (typeof process.getuid === 'function' && stat.uid !== process.getuid())) {
+    fail(`${OPENING_DIR} is not a folder of this user's: not writing a sign-in page there`);
+  }
+  fs.chmodSync(OPENING_DIR, 0o700);
+  for (const name of fs.readdirSync(OPENING_DIR)) {
+    const file = path.join(OPENING_DIR, name);
+    try {
+      if (Date.now() - fs.lstatSync(file).mtimeMs > OPENING_LIFETIME) fs.rmSync(file, { force: true });
+    } catch { /* gone already */ }
+  }
+  return OPENING_DIR;
+}
+const escapeHtml = (text) => text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const page = `<!doctype html>
+<meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="refresh" content="0; url=${escapeHtml(url)}">
+<title>Opening Driftboard</title>
+<script>location.replace(${JSON.stringify(url).replace(/</g, '\\u003c')});</script>
+<p>Opening the board…</p>
+`;
+const file = path.join(openingFolder(), `${randomBytes(16).toString('hex')}.html`);
+fs.writeFileSync(file, page, { mode: 0o600, flag: 'wx' });
+const opener = { darwin: 'open', win32: 'explorer' }[process.platform] || 'xdg-open';
+console.log(`opening the board in your browser (through ${file}, which works once, for a minute)`);
+execFile(opener, [pathToFileURL(file).href], (err) => {
+  if (err) console.error(`could not open a browser (${err.message}): run \`npm run open -- --print\` and open the link it prints`);
+});

@@ -119,13 +119,18 @@ as the server (`PORT=5000 npm start`, then `PORT=5000 npm run open`).
 The board has no accounts. On first start the server makes a random token and keeps
 it in `data/token`, readable only by you; whoever has the token can read and change
 the board. `npm run open` asks the server for a sign-in code that works once, for a
-minute, and opens `http://127.0.0.1:4321/?code=…`; the page swaps the code for the
-token, keeps it in its memory only and takes the code out of the address bar. So the
-token never shows up in an address, in the browser's command line (which every user of
-the machine can read), in its history or in its storage. There are no cookies. A page
+minute, and writes a small page, readable only by you, in `data/opening/`, that sends
+the browser on to `http://127.0.0.1:4321/#code=…`. The browser is given that page's
+path, never the code: every user of the machine can read the browser's command line,
+and could use a code they read there before the browser does. The page swaps the code
+for the token, keeps the token in its memory only and takes the code out of the
+address bar. So the token never shows up in an address, on a command line, in the
+browser's history or in its storage. There are no cookies. A page
 stays signed in for as long as it is open: after a reload, or in a new tab, open the
 board again with `npm run open` (or the app that opened it).
-`npm run open -- --print` prints the link without opening a browser.
+`npm run open -- --print` prints the link (`http://127.0.0.1:4321/#code=…`) without
+opening a browser. (A browser that cannot read files in the data folder, such as some
+sandboxed ones, needs the printed link.)
 
 While the board is down, any user of the machine can listen on its port and answer in
 its place, with pages of their own at its address. What that gets them:
@@ -156,8 +161,10 @@ Scripts send the token as `Authorization: Bearer <token>` on every `/api` call:
   proof is right, and on the same connection if you can (`open.js` shows how): another
   program can take the port between two connections.
 - `POST /api/sign-in-codes` returns `{"code": …, "expiresAt": …}`: open
-  `http://127.0.0.1:4321/?code=<code>` to sign a browser in (add `#card=<id>` to open a
-  card once signed in).
+  `http://127.0.0.1:4321/#code=<code>` to sign a browser in (`#code=<code>&card=<id>`
+  also opens a card once signed in; `?code=<code>` works too). To open a browser on this
+  machine, do as `npm run open` does: put the link in a page only you can read (a meta
+  refresh and a `location.replace`) and give the browser that page's path, not the link.
 - An uploaded file is at `/uploads/<file>?k=<key>`, where the key is the HMAC-SHA256
   of `uploads` keyed with the token, in hex (`GET /api/session` returns it as
   `uploadsKey`). The key opens uploaded files only.
