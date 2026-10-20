@@ -5,7 +5,7 @@ import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { DATA_DIR, HOST, OPENING_DIR, PORT, TOKEN_FILE, localURL } from './settings.js';
+import { DATA_DIR, HOST, OPENING_DIR, PORT, TOKEN_FILE, TOKEN_FORMAT_FILE, localURL } from './settings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
@@ -197,18 +197,32 @@ function attachmentType(mimeType) {
 // one-time code from `npm run open` (POST /api/session), so the address it is opened with
 // never holds the token. The page itself is public code (it is the GitHub Pages demo too).
 
+// Earlier versions let the token out: in the address the browser was opened with (on command
+// lines every user can read, and in the history), in a cookie that went to every port on
+// 127.0.0.1, and in the browser's storage. A token one of them made is replaced, once:
+// token-format, next to the token, marks one made since.
+const TOKEN_FORMAT = '2';
 function loadToken() {
+  let saved = '';
   if (fs.existsSync(TOKEN_FILE)) {
     const { mode } = makePrivate(TOKEN_FILE, 0o600); // refuses a token another user wrote
     if (mode & 0o077) {
       console.warn(`warning: ${TOKEN_FILE} was open to other users. It is private now, but whoever `
         + 'read it can still open the board: delete it and restart to make a new token.');
     }
-    const saved = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
-    if (saved) return saved;
+    saved = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
   }
+  let format = '';
+  try { format = fs.readFileSync(TOKEN_FORMAT_FILE, 'utf8').trim(); } catch { /* none: an earlier version's token */ }
+  if (saved && format === TOKEN_FORMAT) return saved;
   const made = randomBytes(32).toString('base64url');
-  fs.writeFileSync(TOKEN_FILE, made + '\n', { mode: 0o600 });
+  fs.writeFileSync(`${TOKEN_FILE}.tmp`, made + '\n', { mode: 0o600 });
+  fs.renameSync(`${TOKEN_FILE}.tmp`, TOKEN_FILE);
+  fs.writeFileSync(TOKEN_FORMAT_FILE, TOKEN_FORMAT + '\n', { mode: 0o600 });
+  if (saved) {
+    console.log(`the token changed: ${TOKEN_FILE} holds a new one, because an earlier version let the old one out. `
+      + 'Scripts that read the token file pick up the new one; browsers need `npm run open` again.');
+  }
   return made;
 }
 const TOKEN = loadToken();
@@ -267,6 +281,15 @@ function useSignInCode(code) {
 // --- App -------------------------------------------------------------------
 
 const app = express();
+// Earlier versions kept the token in a cookie, driftboard_token, for a year. A cookie for
+// 127.0.0.1 goes to every port on it, where any user of this machine can listen: while a
+// browser still sends one, it is told to drop it (it was set for / or for /api).
+app.use((req, res, next) => {
+  if (/(^|;)\s*driftboard_token=/.test(req.get('Cookie') || '')) {
+    for (const cookiePath of ['/', '/api']) res.clearCookie('driftboard_token', { path: cookiePath, httpOnly: true, sameSite: 'strict' });
+  }
+  next();
+});
 app.use((req, res, next) => {
   res.set('Content-Security-Policy', "frame-ancestors 'none'"); // no other page may frame the board
   res.set('X-Frame-Options', 'DENY');

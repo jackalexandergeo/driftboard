@@ -149,6 +149,13 @@ its place, with pages of their own at its address. What that gets them:
   opened with `npm run open`, only ever says it is locked; `npm run open` checks the
   server before it opens anything.
 
+Upgrading from an earlier version: on its first start, this version makes a new token,
+once (it logs that it did), because earlier versions let the old one out: in sign-in
+links on command lines and in the history, in a cookie sent to every port on
+127.0.0.1, and in the browser's storage. Scripts that read `data/token` simply pick up
+the new one; browsers need `npm run open` again. A browser that still has the old
+`driftboard_token` cookie is told to drop it the next time it visits the board.
+
 Scripts send the token as `Authorization: Bearer <token>` on every `/api` call:
 
 - Never put the token on a command line: `curl -H "Authorization: Bearer $(cat data/token)"`
