@@ -339,10 +339,11 @@
       const found = getBinder(seg[2]); if (!found) throw err('binder not found');
       const { ws, binder } = found;
       if (method === 'PATCH') {
+        if (j.color !== undefined && !(typeof j.color === 'string' && /^#[0-9a-f]{6}$/i.test(j.color))) throw err('color must be #rrggbb'); // as server.js
         if (typeof j.title === 'string' && j.title.trim()) binder.title = j.title.trim();
         if (j.x !== undefined) binder.x = Number(j.x);
         if (j.y !== undefined) binder.y = Number(j.y);
-        if (typeof j.color === 'string') binder.color = j.color;
+        if (j.color !== undefined) binder.color = j.color.toLowerCase();
         if (typeof j.description === 'string') binder.description = j.description;
         await persist(); return binder;
       }

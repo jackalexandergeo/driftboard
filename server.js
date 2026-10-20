@@ -429,14 +429,19 @@ app.post('/api/workspaces/:id/binders', (req, res) => {
   res.status(201).json(binder);
 });
 
+// A colour is drawn into the page's CSS (--binder-color), so it is a colour and nothing else:
+// a url() there would load from anywhere.
+const isColor = (value) => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+
 app.patch('/api/binders/:id', (req, res) => {
   const found = getBinder(req.params.id);
   if (!found) return res.status(404).json({ error: 'binder not found' });
+  if (req.body.color !== undefined && !isColor(req.body.color)) return res.status(400).json({ error: 'color must be #rrggbb' });
   const { binder } = found;
   if (typeof req.body.title === 'string' && req.body.title.trim()) binder.title = req.body.title.trim();
   if (req.body.x !== undefined) binder.x = Number(req.body.x);
   if (req.body.y !== undefined) binder.y = Number(req.body.y);
-  if (typeof req.body.color === 'string') binder.color = req.body.color;
+  if (req.body.color !== undefined) binder.color = req.body.color.toLowerCase();
   if (typeof req.body.description === 'string') binder.description = req.body.description;
   persist();
   res.json(binder);

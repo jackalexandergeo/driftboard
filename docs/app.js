@@ -403,7 +403,8 @@ function makeCardEl(card, free) {
   return el;
 }
 
-const binderColor = (binder, index) => binder.color || BINDER_COLORS[index % BINDER_COLORS.length];
+// Only a #rrggbb colour is drawn (the server takes no other now); one saved before is ignored.
+const binderColor = (binder, index) => (/^#[0-9a-f]{6}$/i.test(binder.color || '') ? binder.color : BINDER_COLORS[index % BINDER_COLORS.length]);
 
 function makeBinderEl(binder, index) {
   const el = document.createElement('div');
