@@ -129,6 +129,14 @@ never shared with other tabs) and takes the code out of the address bar. So the 
 never shows up in an address, on a command line or in the browser's history. There are
 no cookies. A tab stays signed in until it is closed, refreshes included; a new tab
 needs `npm run open` (or the app that opened it) again.
+**A PIN for new tabs.** `npm run set-pin` (in a terminal; it asks twice and shows nothing)
+sets a PIN, and the locked page then asks for it, so a new tab or a bookmark signs in
+without a terminal. Only a slow scrypt hash is kept (`data/pin`, private). Guessing is
+slowed for everyone (one try at a time, and a wait after each wrong one that doubles) and
+switched off after 20 wrong tries, until you set the PIN again; `npm run set-pin --
+--remove` turns it off. The PIN goes to whatever answers at the board's address, like
+anything typed into the page: type it into a board you know is running.
+
 `npm run open -- --print` prints the link (`http://127.0.0.1:4321/#code=…`) without
 opening a browser. (A browser that cannot read files in the data folder, such as some
 sandboxed ones, needs the printed link.)

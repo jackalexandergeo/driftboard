@@ -7,6 +7,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DATA_DIR = process.env.DRIFTBOARD_DATA ? path.resolve(process.env.DRIFTBOARD_DATA) : path.join(__dirname, 'data');
 export const TOKEN_FILE = path.join(DATA_DIR, 'token');
 export const TOKEN_FORMAT_FILE = path.join(DATA_DIR, 'token-format'); // marks a token made by this version or later
+// The PIN that signs a tab in from the locked page, as a slow hash (see set-pin.js).
+export const PIN_FILE = path.join(DATA_DIR, 'pin');
 // Sign-in pages that `npm run open` hands the browser (see open.js), private to this user.
 export const OPENING_DIR = path.join(DATA_DIR, 'opening');
 export const PORT = process.env.PORT || 4321;

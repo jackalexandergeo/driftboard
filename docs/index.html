@@ -59,6 +59,12 @@
         (with the same <code>DRIFTBOARD_DATA</code> and <code>PORT</code> as the server), or
         from the app that opened it. A tab keeps its sign-in until it is closed, so a new
         tab, or one reopened after closing, needs the board opening again.</p>
+      <form id="pin-form" class="pin-form hidden" autocomplete="off">
+        <label for="pin-input">Or sign in with your PIN</label>
+        <input id="pin-input" type="password" inputmode="numeric" maxlength="32" autocomplete="off" />
+        <button type="submit">Sign in</button>
+        <p class="pin-error" id="pin-error" role="status"></p>
+      </form>
     </div>
 
     <div class="locked hidden" id="away" role="alert">

@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "open": "node open.js"
+    "open": "node open.js",
+    "set-pin": "node set-pin.js"
   },
   "dependencies": {
     "dompurify": "^3.4.12",

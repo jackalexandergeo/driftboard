@@ -1,12 +1,12 @@
 import express from 'express';
 import multer from 'multer';
 import { fileURLToPath } from 'node:url';
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
-import { DATA_DIR, HOST, OPENING_DIR, PORT, TOKEN_FILE, TOKEN_FORMAT_FILE, localURL } from './settings.js';
+import { DATA_DIR, HOST, OPENING_DIR, PIN_FILE, PORT, TOKEN_FILE, TOKEN_FORMAT_FILE, localURL } from './settings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
@@ -341,6 +341,49 @@ app.post('/api/session', express.json({ limit: '4kb' }), (req, res) => {
     return res.status(401).json({ error: 'that sign-in code is not valid (each works once, for a minute): run `npm run open` again' });
   }
   res.json({ token: TOKEN });
+});
+
+// A PIN set with `npm run set-pin` signs a tab in from the locked page, so a new tab or a
+// bookmark needs no terminal. Only its scrypt hash is kept (data/pin, 0600). Guessing is slowed
+// for everyone (one try at a time, and a wait after each wrong one that doubles), and stops
+// after PIN_MAX_FAILURES wrong ones until the PIN is set again.
+const PIN_MAX_FAILURES = 20;
+const pin = { failures: 0, waitUntil: 0, checking: false, salt: null };
+function readPin() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(PIN_FILE, 'utf8'));
+    if (saved.version !== 1) return null;
+    if (saved.salt !== pin.salt) Object.assign(pin, { failures: 0, waitUntil: 0, salt: saved.salt }); // set again
+    return saved;
+  } catch {
+    return null;
+  }
+}
+app.get('/api/pin', (req, res) => {
+  res.json({ enabled: Boolean(readPin()) && pin.failures < PIN_MAX_FAILURES });
+});
+app.post('/api/pin', express.json({ limit: '1kb' }), (req, res) => {
+  const saved = readPin();
+  if (!saved) return res.status(404).json({ error: 'no PIN is set: run `npm run set-pin` on the machine the board runs on' });
+  if (pin.failures >= PIN_MAX_FAILURES) {
+    return res.status(423).json({ error: 'too many wrong PINs: set it again with `npm run set-pin`' });
+  }
+  const now = Date.now();
+  if (pin.checking || now < pin.waitUntil) {
+    return res.status(429).json({ error: 'wait a moment before trying again', retryAfterMs: Math.max(0, pin.waitUntil - now) });
+  }
+  pin.checking = true;
+  scrypt(String(req.body?.pin ?? ''), Buffer.from(saved.salt, 'hex'), 64, { N: saved.N, r: 8, p: 1, maxmem: 128 * 1024 * 1024 },
+    (err, hash) => {
+      pin.checking = false;
+      if (err || !timingSafeEqual(hash, Buffer.from(saved.hash, 'hex'))) {
+        pin.failures += 1;
+        pin.waitUntil = Date.now() + Math.min(1000 * 2 ** (pin.failures - 1), 10 * 60 * 1000);
+        return res.status(401).json({ error: 'wrong PIN', triesLeft: PIN_MAX_FAILURES - pin.failures });
+      }
+      Object.assign(pin, { failures: 0, waitUntil: 0 });
+      res.json({ token: TOKEN });
+    });
 });
 
 app.use('/api', requireToken);

@@ -108,6 +108,7 @@ function showLocked() {
   keepToken(null);   // a token the board refused is no use after a refresh either
   locked = true;
   $('locked').classList.remove('hidden');
+  offerPin();
 }
 
 // While the board is down, any user of this machine can listen on its port, and a call from
@@ -1308,6 +1309,37 @@ window.addEventListener('hashchange', async () => {
     return;
   }
   openLinkedCard();
+});
+
+// ---------- PIN sign-in ----------
+// When the board has a PIN (`npm run set-pin`), the locked page asks for it. The PIN goes to
+// whatever answers at this address, like anything typed into this page.
+async function offerPin() {
+  if (DEMO) return;
+  const res = await fetch('/api/pin').catch(() => null);
+  const body = res && res.ok ? await res.json().catch(() => null) : null;
+  $('pin-form').classList.toggle('hidden', !body?.enabled);
+  if (body?.enabled) $('pin-input').focus();
+}
+$('pin-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('pin-input');
+  const res = await fetch('/api/pin', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: input.value }),
+  }).catch(() => null);
+  input.value = '';
+  const body = res ? await res.json().catch(() => null) : null;
+  if (!res || !res.ok || typeof body?.token !== 'string') {
+    $('pin-error').textContent = !res ? 'Could not reach the board'
+      : res.status === 401 ? `Wrong PIN (${body?.triesLeft} tries left before it is switched off)`
+      : body?.error || 'That did not work';
+    return;
+  }
+  $('pin-error').textContent = '';
+  keepToken(body.token);
+  locked = false;
+  $('locked').classList.add('hidden');
+  start();
 });
 
 // ---------- go ----------
