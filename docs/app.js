@@ -58,10 +58,11 @@ function endSave() {
 
 // ---------- sign-in ----------
 // The board's data needs its token; the page itself is public. `npm run open` opens the board
-// with a one-time code (#code=, or ?code=), which is swapped for the token here. The token is kept in this
-// page's memory only and goes with every API call as a bearer token. Not in the browser's
-// storage: while the board is down, another user of this machine can serve a page of their own
-// at its address, and that page could read the storage. So a reload needs a new sign-in.
+// with a one-time code (#code=, or ?code=), which is swapped for the token here. The token is
+// kept in this page's memory only and goes with every API call as a bearer token. Not in the
+// browser's storage: while the board is down, another user of this machine can serve a page of
+// their own at its address, and that page could read the storage. So a reload needs a new
+// sign-in.
 let token = null;
 try { localStorage.removeItem('driftboard-token'); } catch { /* where the previous version kept it */ }
 let uploadsKey = '';
@@ -918,7 +919,8 @@ function attachmentBody(att) {
   }
   const src = escapeHtml(fileUrl(att));
   if (att.type === 'image') {
-    // The demo's files are in this page's own origin: only a plain picture opens in a tab (demo-api.js).
+    // The demo's files are in this page's own origin: only a plain picture opens in a tab
+    // (see demo-api.js); anything else downloads.
     const opens = !DEMO || window.DriftboardDemo.opensSafely(att.mimeType);
     return `<a href="${src}" ${opens ? 'target="_blank" rel="noopener"' : `download="${escapeHtml(att.originalName || '')}"`}><img src="${src}" alt=""></a>`;
   }
