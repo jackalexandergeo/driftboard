@@ -587,13 +587,50 @@ app.get('/api/cards/:id', (req, res) => {
   res.json({ workspaceId: found.ws.id, card: found.card });
 });
 
+// Buttons a script puts on its cards (e.g. start / pause): pressing one records it on the card
+// for that script to act on; the board itself runs nothing.
+const BUTTON_ID = /^[a-z][a-z0-9-]{0,31}$/;
+function validButtons(buttons) {
+  return Array.isArray(buttons) && buttons.length <= 3 && buttons.every((button) =>
+    button && typeof button === 'object' && BUTTON_ID.test(button.id) &&
+    typeof button.label === 'string' && button.label.trim() && button.label.length <= 24 &&
+    (button.title === undefined || (typeof button.title === 'string' && button.title.length <= 120)));
+}
+
 app.patch('/api/cards/:id', (req, res) => {
   const found = getCard(req.params.id);
   if (!found) return res.status(404).json({ error: 'card not found' });
+  if (req.body.buttons !== undefined && req.body.buttons !== null && !validButtons(req.body.buttons)) {
+    return res.status(400).json({ error: 'buttons: at most 3 of {id: a-z0-9-, label: up to 24 characters, title?}' });
+  }
+  if (req.body.pressed !== undefined && req.body.pressed !== null) {
+    return res.status(400).json({ error: 'pressed can only be cleared (null); press a button with POST /press' });
+  }
   const { card } = found;
   if (typeof req.body.title === 'string') card.title = req.body.title;
   if (typeof req.body.description === 'string') card.description = req.body.description;
   if (typeof req.body.attSort === 'string' && ['newest', 'oldest', 'custom'].includes(req.body.attSort)) card.attSort = req.body.attSort;
+  if (req.body.buttons !== undefined) {
+    if (req.body.buttons && req.body.buttons.length) {
+      card.buttons = req.body.buttons.map(({ id, label, title }) => (title ? { id, label: label.trim(), title } : { id, label: label.trim() }));
+    } else delete card.buttons;
+  }
+  if (req.body.pressed === null) delete card.pressed;
+  card.updatedAt = now();
+  persist();
+  res.json(card);
+});
+
+// Press one of a card's buttons: {button: id}. Only a button the card has; a second press
+// before the script took the first replaces it.
+app.post('/api/cards/:id/press', (req, res) => {
+  const found = getCard(req.params.id);
+  if (!found) return res.status(404).json({ error: 'card not found' });
+  const { card } = found;
+  if (!(card.buttons || []).some((button) => button.id === req.body.button)) {
+    return res.status(400).json({ error: 'this card has no such button' });
+  }
+  card.pressed = { button: req.body.button, at: now() };
   card.updatedAt = now();
   persist();
   res.json(card);

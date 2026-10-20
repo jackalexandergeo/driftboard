@@ -409,6 +409,29 @@ function cardBadges(card) {
   return `${badges}${thumbs ? `<div class="card-thumbs">${thumbs}</div>` : ''}`;
 }
 
+// The buttons a script put on the card. Pressing one only records it on the card; the script
+// that owns the card acts on it and clears it (until then the button waits, disabled).
+function cardButtons(card) {
+  if (!(card.buttons || []).length) return null;
+  const row = document.createElement('div');
+  row.className = 'card-buttons';
+  for (const button of card.buttons) {
+    const b = document.createElement('button');
+    b.className = 'card-button';
+    b.textContent = button.label;
+    if (button.title) b.title = button.title;
+    if (card.pressed && card.pressed.button === button.id) { b.disabled = true; b.classList.add('pending'); }
+    b.addEventListener('click', async (e) => {
+      e.stopPropagation(); // not a click on the card, which opens it
+      b.disabled = true; b.classList.add('pending');
+      try { await api('POST', `/api/cards/${card.id}/press`, { button: button.id }); await reloadWorkspace(); }
+      catch (err) { b.disabled = false; b.classList.remove('pending'); toast(err.message); }
+    });
+    row.append(b);
+  }
+  return row;
+}
+
 function makeCardEl(card, free) {
   const el = document.createElement('div');
   el.className = 'card' + (free ? ' free' : '') + (card.id === pendingPopId ? ' pop-in' : '') + (card.id === droppedId ? ' drop-in' : '');
@@ -423,6 +446,8 @@ function makeCardEl(card, free) {
   const descEl = el.querySelector('.card-desc');
   const preview = stripMd(card.description);
   if (preview) descEl.textContent = preview; else descEl.remove();
+  const buttons = cardButtons(card);
+  if (buttons) el.insertBefore(buttons, el.querySelector('.card-badges, .card-thumbs'));
 
   const actions = document.createElement('div');
   actions.className = 'card-actions';
