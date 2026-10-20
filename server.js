@@ -307,7 +307,11 @@ app.use((req, res, next) => {
   next();
 });
 app.use((req, res, next) => {
-  res.set('Content-Security-Policy', "frame-ancestors 'none'"); // no other page may frame the board
+  // Scripts only from the board's own files: should anything slip markup into the page, it cannot
+  // run script there (no inline script, no plugins, no <base> to repoint the board's own files).
+  // No other page may frame the board. Styles, fonts and pictures are left alone: the page sets
+  // inline styles, loads its font from Google Fonts and shows blob: and data: pictures (demo).
+  res.set('Content-Security-Policy', "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
   res.set('X-Frame-Options', 'DENY');
   res.set('Referrer-Policy', 'no-referrer'); // links out of the board do not carry its address
   next();
