@@ -316,9 +316,17 @@ function saveView() {
 }
 
 // ---------- load / render ----------
+// A notice a script pinned to the board (`PUT /api/notice`), shown at the top until cleared.
+function showNotice(notice) {
+  const el = $('notice');
+  el.textContent = notice?.text || '';
+  el.className = `board-notice ${notice?.level || 'info'}` + (notice?.text ? '' : ' hidden');
+}
+
 async function loadState() {
   if (!DEMO) uploadsKey = (await api('GET', '/api/session')).uploadsKey;
   const s = await api('GET', '/api/state');
+  showNotice(s.notice);
   wsList = s.workspaces; activeWorkspaceId = s.activeWorkspaceId;
   renderTabs();
   await loadWorkspace(activeWorkspaceId);
@@ -1241,6 +1249,7 @@ async function checkForChanges() {
   checking = true;
   try {
     const { data: s, revision } = await request('GET', '/api/state');
+    showNotice(s.notice);
     if (revision === knownRevision && !changedElsewhere) return;
     changedElsewhere = false;
     const boardGone = !s.workspaces.some((w) => w.id === activeWorkspaceId);

@@ -449,3 +449,10 @@ body.att-reordering { cursor: grabbing; user-select: none; -webkit-user-select: 
 .composer { display: flex; flex-direction: column; gap: 6px; }
 .composer textarea { width: 100%; border: 1px solid var(--orange); border-radius: 8px; padding: 8px; font: inherit; font-size: 14px; resize: none; background: var(--surface); color: var(--text); }
 .composer .row { display: flex; gap: 6px; }
+
+/* A notice a script pinned to the board (PUT /api/notice). */
+.board-notice { position: relative; z-index: 300; padding: 7px 16px; text-align: center;
+  font-size: 14px; font-weight: 500; color: #fff; background: var(--gray); }
+.board-notice.warning { background: var(--orange); }
+.board-notice.error { background: var(--red); }
+.board-notice.hidden { display: none; }

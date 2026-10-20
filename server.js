@@ -430,7 +430,28 @@ app.get('/api/state', (req, res) => {
   res.json({
     activeWorkspaceId: state.activeWorkspaceId,
     workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name })),
+    notice: state.notice || null,
   });
+});
+
+// A one-line notice a script pins at the top of the board ("out of usage until 7pm"), until it
+// clears it. Text only; every open tab shows it within seconds.
+app.put('/api/notice', (req, res) => {
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim().slice(0, 300) : '';
+  const level = ['info', 'warning', 'error'].includes(req.body?.level) ? req.body.level : 'info';
+  if (!text) return res.status(400).json({ error: 'text is required (DELETE /api/notice clears it)' });
+  if (state.notice?.text !== text || state.notice?.level !== level) {
+    state.notice = { text, level, at: now() };
+    persist();
+  }
+  res.json(state.notice);
+});
+app.delete('/api/notice', (req, res) => {
+  if (state.notice) {
+    state.notice = null;
+    persist();
+  }
+  res.json({ ok: true });
 });
 
 app.patch('/api/state', (req, res) => {
