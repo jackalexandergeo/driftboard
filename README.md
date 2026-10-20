@@ -129,6 +129,11 @@ and takes the code out of the address bar. So the token never shows up in an add
 a command line or in the browser's history, and the browser stays signed in: refreshes,
 new tabs and restarts included. There are no cookies: a cookie for 127.0.0.1 goes to
 every port on it, where any user of the machine can listen.
+**No sign-in at all.** On a machine nobody else logs into, start the server with
+`DRIFTBOARD_SIGN_IN=off`: the board opens without a token, PIN or `npm run open`. It still
+listens on this machine only, answers only to its own names, and refuses other sites'
+requests; but anyone logged into the machine can then read and change it.
+
 **A PIN for new tabs.** `npm run set-pin` (in a terminal; it asks twice and shows nothing)
 sets a PIN, and the locked page then asks for it, so a new tab or a bookmark signs in
 without a terminal. Only a slow scrypt hash is kept (`data/pin`, private). Guessing is

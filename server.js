@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
-import { DATA_DIR, HOST, OPENING_DIR, PIN_FILE, PORT, TOKEN_FILE, TOKEN_FORMAT_FILE, localURL } from './settings.js';
+import { DATA_DIR, HOST, OPENING_DIR, PIN_FILE, PORT, SIGN_IN, TOKEN_FILE, TOKEN_FORMAT_FILE, localURL } from './settings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
@@ -242,6 +242,7 @@ function requestToken(req) {
 }
 
 function requireToken(req, res, next) {
+  if (!SIGN_IN) return next();   // DRIFTBOARD_SIGN_IN=off
   if (!sameSecret(requestToken(req), TOKEN)) {
     return res.status(401).json({ error: 'this board is locked: open it with `npm run open`' });
   }
@@ -359,6 +360,10 @@ function readPin() {
     return null;
   }
 }
+// Whether this board asks for a sign-in at all (DRIFTBOARD_SIGN_IN=off says no).
+app.get('/api/sign-in', (req, res) => {
+  res.json({ required: SIGN_IN });
+});
 app.get('/api/pin', (req, res) => {
   res.json({ enabled: Boolean(readPin()) && pin.failures < PIN_MAX_FAILURES });
 });
@@ -396,7 +401,7 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.use('/uploads', (req, res, next) => {
-  if (sameSecret(req.query.k, UPLOADS_KEY) || sameSecret(requestToken(req), TOKEN)) return next();
+  if (!SIGN_IN || sameSecret(req.query.k, UPLOADS_KEY) || sameSecret(requestToken(req), TOKEN)) return next();
   res.status(401).send('this file needs the board\'s uploads key');
 });
 app.use(express.json({ limit: '2mb' }));
@@ -724,6 +729,7 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, HOST, () => {
-  console.log(`driftboard running at ${localURL()}; open it with: npm run open`);
+  console.log(SIGN_IN ? `driftboard running at ${localURL()}; open it with: npm run open`
+    : `driftboard running at ${localURL()} with no sign-in (DRIFTBOARD_SIGN_IN=off): anyone on this machine can open it`);
   console.log(`data dir: ${DATA_DIR}`);
 });

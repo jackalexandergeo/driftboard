@@ -66,6 +66,7 @@ function endSave() {
 // board's own address while the board is down could read it, if the board is opened right then.
 const TOKEN_KEY = 'driftboard-token';
 let token = null;
+let signInOff = false;   // the server says it asks for no sign-in (DRIFTBOARD_SIGN_IN=off)
 try { token = localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY); } catch { /* storage blocked: memory only */ }
 try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* where the previous version kept it */ }
 function keepToken(value) {
@@ -123,6 +124,12 @@ function proveServer() {
   return proving;
 }
 async function askForProof() {
+  if (signInOff) { // nothing to keep from an impostor: only ask that the board answers
+    const res = await fetch('/api/sign-in', { cache: 'no-store' }).catch(() => null);
+    const body = res && res.ok ? await res.json().catch(() => null) : null;
+    if (body?.required === false) return;
+    throw Object.assign(new Error('the board is not answering'), { status: 0 });
+  }
   const nonce = [...crypto.getRandomValues(new Uint8Array(32))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
   const expected = window.DriftboardHMAC(token, `driftboard-hello:${nonce}`);
   let proof = null;
@@ -169,10 +176,10 @@ async function request(method, url, body, isForm) {
   if (isWrite) beginSave();
   try {
     if (DEMO) return { data: await window.DriftboardDemo.handle(method, url, body, isForm), revision: null }; // browser backend, same shapes
-    if (!token) { showLocked(); throw Object.assign(new Error('this board is locked: open it with `npm run open`'), { status: 401 }); }
+    if (!token && !signInOff) { showLocked(); throw Object.assign(new Error('this board is locked: open it with `npm run open`'), { status: 401 }); }
     if (away) throw awayError();
     try { await proveServer(); } catch { goAway(); throw awayError(); }
-    opts.headers.Authorization = `Bearer ${token}`;
+    if (token) opts.headers.Authorization = `Bearer ${token}`;
     let res;
     try { res = await fetch(url, opts); } catch { goAway(); throw awayError(); }
     if (res.status === 401) { goAway(); throw awayError(); }
@@ -1346,4 +1353,10 @@ $('pin-form').addEventListener('submit', async (e) => {
 function start() {
   return loadState().then(openLinkedCard).catch((e) => { if (!locked && !away) toast('Failed to load: ' + e.message); });
 }
-signInWithCode(takeSignInCode()).then(start);
+async function checkSignIn() {
+  if (DEMO) return;
+  const res = await fetch('/api/sign-in', { cache: 'no-store' }).catch(() => null);
+  const body = res && res.ok ? await res.json().catch(() => null) : null;
+  signInOff = body?.required === false;
+}
+checkSignIn().then(() => (signInOff ? takeSignInCode() : signInWithCode(takeSignInCode()))).then(start);

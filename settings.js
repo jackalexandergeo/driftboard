@@ -15,6 +15,9 @@ export const PORT = process.env.PORT || 4321;
 // Only this machine by default. Not plain HOST: tcsh and many CI systems set that to the
 // machine's name, which would quietly open the board to the network.
 export const HOST = process.env.DRIFTBOARD_HOST || '127.0.0.1';
+// DRIFTBOARD_SIGN_IN=off: no sign-in at all, for a machine with no other users to keep out.
+// The board still listens on this machine only and refuses other sites' requests.
+export const SIGN_IN = (process.env.DRIFTBOARD_SIGN_IN || 'on').toLowerCase() !== 'off';
 
 // The address a browser on this machine uses. A browser keeps its sign-in per address, and
 // localhost is another address than 127.0.0.1 to it, so this is always the same one.
