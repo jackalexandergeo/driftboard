@@ -300,18 +300,20 @@ class Helper:
         try:
             folder = os.path.join(self.directory, "runs", card["id"])
             os.makedirs(folder, mode=0o700, exist_ok=True)
+            control = self._controlFolder(card["id"])
             with open(os.path.join(folder, "card.md"), "w") as cardFile:
                 cardFile.write(cardMarkdown(card, contexts))
             outbox = os.path.join(folder, "outbox.jsonl")
-            settingsPath = self._writeSettings(folder, outbox)
+            settingsPath = self._writeSettings(folder, outbox, control)
             prompt = self._firstPrompt(folder)
             session = self.launcher.start("%s · board" % card.get("title", "card")[:60], settingsPath, BRIEF, prompt,
-                                          self._environment(folder, outbox))
+                                          self._environment(folder, outbox, control))
         except (LaunchError, OSError) as error:
             self._revoke(card["id"])   # no agent holds the token just minted
             raise LaunchError(str(error)) from error
         seen = (self.state["runs"].get(card["id"]) or {}).get("seenChat") or []
         self.state["runs"][card["id"]] = {"state": "working", "session": session, "token": token, "folder": folder,
+                                          "control": control, "settingsPath": settingsPath,
                                           "outbox": outbox, "offset": 0, "contexts": contexts, "queued": [],
                                           "startedAt": self._clock(), "turnAt": self._clock(), "seenWorking": False,
                                           "seenChat": seen}
@@ -319,11 +321,20 @@ class Helper:
         self._save()   # now: a crash later in the pass must not lose a running agent
         logger.info("card %s: started %s session %s", card["id"], self.launcher.tool, session)
 
-    def _writeSettings(self, folder, outbox):
+    def _controlFolder(self, cardId):
+        """The helper's own folder for a run: its settings and stand-ins, outside the run folder the
+        agent may write to (and outside Codex's writable roots)."""
+        control = os.path.join(self.directory, "control", cardId)
+        os.makedirs(control, mode=0o700, exist_ok=True)
+        return control
+
+    def _writeSettings(self, folder, outbox, control, settingsPath=None):
+        """settingsPath: where the session reads its settings (a run started before the control
+        folder existed reads them in its run folder)."""
         agent = self.config["agent"]
-        guards = writeGuards(os.path.join(folder, "guards"), unguarded(agent.get("access"), agent.get("limits")),
+        guards = writeGuards(os.path.join(control, "guards"), unguarded(agent.get("access"), agent.get("limits")),
                              {"gitHosts": agent.get("gitHosts") or [], "push": limitsOf(agent.get("limits"))["push"] != "never"})
-        environmentFile = os.path.join(folder, "session-env.sh")
+        environmentFile = os.path.join(control, "session-env.sh")
         with open(environmentFile, "w") as script:
             script.write('export PATH=%s:%s:"$PATH"\n' % (shlex.quote(guards), shlex.quote(AGENT_BIN)))
         settings = {
@@ -337,16 +348,16 @@ class Helper:
         }
         if agent.get("model"):
             settings["model"] = agent["model"]
-        path = os.path.join(folder, "settings.json")
+        path = settingsPath or os.path.join(control, "settings.json")
         descriptor = os.open(path + ".new", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, "w") as settingsFile:
             json.dump(settings, settingsFile, indent=1)
         os.replace(path + ".new", path)
         return path
 
-    def _environment(self, folder, outbox):
+    def _environment(self, folder, outbox, control):
         """For a tool without a settings file (Codex): what a Claude session gets through its settings."""
-        guards = os.path.join(folder, "guards")
+        guards = os.path.join(control, "guards")
         return {"DRIFTBOARD_OUTBOX": outbox, "DRIFTBOARD_RUN": folder,
                 "DRIFTBOARD_GIT_HOSTS": ",".join(self.config["agent"].get("gitHosts") or []),
                 "PATH": os.pathsep.join([guards, AGENT_BIN, os.environ.get("PATH", "")])}
@@ -372,7 +383,9 @@ class Helper:
             logger.warning("card %s: could not wake its agent, kept the message for later: %s", cardId, error)
 
     def _wake(self, cardId, run, message):
-        self._writeSettings(run["folder"], run["outbox"])   # what the user changed in the config since
+        if not run.get("control"):   # started before the control folder: its session reads the old path
+            run.update(control=self._controlFolder(cardId), settingsPath=os.path.join(run["folder"], "settings.json"))
+        self._writeSettings(run["folder"], run["outbox"], run["control"], run.get("settingsPath"))   # the config as it is now
         full = run.get("fullSession") or (self._states or {}).get(run["session"], (None, None))[1]
         if not full:
             raise LaunchError("no full session id for %s yet" % run["session"])

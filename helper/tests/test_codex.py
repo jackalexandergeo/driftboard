@@ -92,7 +92,9 @@ class CodexTest(unittest.TestCase):
         self.assertIn("sandbox_workspace_write.writable_roots=%s" % json.dumps([run]), first["arguments"])
         self.assertEqual(first["arguments"][first["arguments"].index("-m") + 1], "gpt-test")
         self.assertTrue(first["message"].startswith("# You are an agent working on a card"))   # the brief leads
-        self.assertEqual(first["path"].split(os.pathsep)[0], os.path.join(run, "guards"))   # stand-ins first
+        control = helper.state["runs"][cardId]["control"]
+        self.assertEqual(first["path"].split(os.pathsep)[0], os.path.join(control, "guards"))   # stand-ins first ...
+        self.assertFalse(control.startswith(run))   # ... out of the writable run folder
         restarted = self.helper()   # a new helper, as after a restart: the run goes on from the registry
         self.board.call("POST", "/api/cards/%s/press" % cardId, {"button": "reply", "text": "October."})
         self.untilIdle(restarted, cardId)

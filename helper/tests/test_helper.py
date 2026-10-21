@@ -524,7 +524,28 @@ class HelperTest(unittest.TestCase):
         with open(session["env"]["CLAUDE_ENV_FILE"]) as environmentFile:
             first = environmentFile.read().split("=", 1)[1].split(":")[0]
         self.assertEqual(sorted(os.listdir(first)), ["gh", "git", "glab", "scp", "sftp"])   # ssh opened: no stand-in
-        self.assertEqual(os.stat(os.path.join(session["env"]["DRIFTBOARD_RUN"], "settings.json")).st_mode & 0o777, 0o600)
+        run = self.helper.state["runs"][cardId]
+        self.assertEqual(os.stat(os.path.join(run["control"], "settings.json")).st_mode & 0o777, 0o600)
+        # the agent writes its run folder; its settings and stand-ins are not in it
+        self.assertFalse(set(os.listdir(run["folder"])) & {"settings.json", "guards", "session-env.sh"})
+        self.assertFalse(first.startswith(run["folder"]))
+
+    def testARunFromBeforeTheControlFolderKeepsItsSettingsPath(self):
+        cardId = self.item("Old run")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        self.now += 31
+        self.helper.passOnce()
+        run = self.helper.state["runs"][cardId]
+        for key in ("control", "settingsPath"):   # as an older helper left it
+            run.pop(key)
+        self.press(cardId, "reply", "Carry on.")
+        self.helper.passOnce()
+        with open(os.path.join(run["folder"], "settings.json")) as settingsFile:   # where its session reads them
+            settings = json.load(settingsFile)
+        self.assertEqual(settings["env"]["CLAUDE_ENV_FILE"], os.path.join(run["control"], "session-env.sh"))
 
 
 if __name__ == "__main__":
