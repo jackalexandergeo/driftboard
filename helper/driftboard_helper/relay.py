@@ -21,6 +21,7 @@ class Relay:
         self.cardToken = cardToken
         self.reader = OutboxReader(outboxPath, offset)
         self.closed = False
+        self.sentKinds = set()   # what the last pump took to the card (an ask, say)
 
     @property
     def offset(self):
@@ -30,6 +31,7 @@ class Relay:
         """Forward what is new. A report the board refuses is logged and skipped; when the board
         cannot be reached the rest waits for the next pump; a closed card stops the relay."""
         sent = 0
+        self.sentKinds = set()
         for entry, offset in self.reader.read():
             method, suffix, field = AGENT_CALLS[entry["kind"]]
             value = entry["column"] if entry["kind"] == "move" else entry["text"]
@@ -37,6 +39,7 @@ class Relay:
                 self.board.request(method, "/api/agent/cards/%s%s" % (self.cardId, suffix), {field: value},
                                    cardToken=self.cardToken)
                 sent += 1
+                self.sentKinds.add(entry["kind"])
             except BoardError as error:
                 if error.status == CLOSED:
                     self.closed = True

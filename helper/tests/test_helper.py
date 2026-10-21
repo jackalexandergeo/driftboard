@@ -480,6 +480,31 @@ class HelperTest(unittest.TestCase):
         self.assertNotIn(cardId, self.helper.state["runs"])
         self.assertFalse(os.path.exists(run["folder"]) or os.path.exists(run["control"]))
 
+    def testACommandWaitingForTheUsersYesIsShownOnTheCard(self):
+        self.claude.turns = [[("progress", "about to push the branch")]]
+        cardId = self.item("Needs a yes")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        session = next(iter(self.claude.sessions.values()))
+        session["state"] = "blocked"   # no question asked: a permission prompt
+        self.now += 31
+        self.helper.passOnce()
+        shortId = self.helper.state["runs"][cardId]["session"]
+        self.assertIn("claude attach %s" % shortId, self.card(cardId)["agent"]["progress"])
+
+    def testAQuestionIsNotMistakenForAPermissionPrompt(self):
+        cardId = self.item("Asks")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        next(iter(self.claude.sessions.values()))["state"] = "blocked"
+        self.now += 31
+        self.helper.passOnce()
+        self.assertNotIn("claude attach", self.card(cardId)["agent"].get("progress") or "")
+
     def testACardAlreadyClosedOffersNoAgent(self):
         # Live: cards posted straight into Won't do got ▶ Start.
         cardId = self.board.call("POST", "/api/items", {"source": "test", "title": "Out of scope", "column": "Won't do"})["cardId"]

@@ -428,7 +428,7 @@ class Helper:
         if not full:
             raise LaunchError("no full session id for %s yet" % run["session"])
         run["session"] = self.launcher.resume(run["session"], full, message)
-        run.update(state="working", turnAt=self._clock(), seenWorking=False)
+        run.update(state="working", turnAt=self._clock(), seenWorking=False, asked=False, approvalShown=False)
         logger.info("card %s: woke its agent", cardId)
 
     def _close(self, cardId, run):
@@ -443,6 +443,13 @@ class Helper:
             self.board.request("DELETE", "/api/cards/%s/agent" % cardId)
         except BoardError as error:
             logger.warning("card %s: could not revoke its agent's token: %s", cardId, error)
+
+    def _progress(self, cardId, run, text):
+        """The card's progress line, as its agent would set it (with the card's token)."""
+        try:
+            self.board.request("PATCH", "/api/agent/cards/%s" % cardId, {"progress": text[:300]}, cardToken=run["token"])
+        except BoardError as error:
+            logger.warning("card %s: could not show its progress: %s", cardId, error)
 
     def _note(self, cardId, text):
         """Something the user should see on the card (a start or a session that failed)."""
@@ -483,6 +490,8 @@ class Helper:
             relay = self._relays[cardId] = Relay(self.board, cardId, run["token"], run["outbox"], run.get("offset", 0))
         relay.pump()
         run["offset"] = relay.offset
+        if "ask" in relay.sentKinds:
+            run["asked"] = True   # this turn ends on its question, not on a command waiting for a yes
         if relay.closed:
             self._close(cardId, run)
             return
@@ -500,6 +509,12 @@ class Helper:
             logger.warning("card %s: its %s session %s failed", cardId, self.launcher.tool, run["session"])
         elif run["state"] == "working" and listed and listed[0] in TURN_OVER and settled:
             run["state"] = "idle"   # its turn is over: it asked, finished, or stopped by itself
+        if (listed and listed[0] == "blocked" and settled and self.launcher.tool == "claude" and not run.get("asked")
+                and not run.get("approvalShown")):
+            # blocked with no question: Claude Code waits for the user's yes on a command (an "ask" limit)
+            self._progress(cardId, run, "Waiting for your yes on a command: run `claude attach %s` to approve or "
+                                        "decline it" % run["session"])
+            run["approvalShown"] = True
 
     def _save(self):
         text = json.dumps(self.state, indent=1)
