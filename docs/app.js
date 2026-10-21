@@ -531,11 +531,13 @@ function waitingButton(b, button, pressedAt) {
   b.title = `Pressed ${ago(waited)} and nothing picked it up: the helper (or whatever script looks after this card) may not be running. Press again to retry.`;
 }
 
-function cardButtons(card) {
-  if (!(card.buttons || []).length) return null;
+// A card's buttons: those for its face, or (where 'open') those for the open card only.
+function cardButtons(card, where = 'card') {
+  const buttons = (card.buttons || []).filter((button) => (button.place === 'open') === (where === 'open'));
+  if (!buttons.length) return null;
   const row = document.createElement('div');
   row.className = 'card-buttons';
-  for (const button of card.buttons) {
+  for (const button of buttons) {
     const b = document.createElement('button');
     b.className = 'card-button';
     b.textContent = button.label;
@@ -978,6 +980,17 @@ function renderAgent(card) {
   if (!agent) return;
   const state = agent.stoppedAt ? `stopped ${shortDate(agent.stoppedAt)}` : `since ${shortDate(agent.startedAt)}`;
   $('agent-head').textContent = `Agent: ${agent.name || 'agent'} · ${state}`;
+  const actions = $('agent-actions');
+  actions.innerHTML = '';
+  if (card.terminalEnabled && !DEMO) {
+    const open = document.createElement('button');
+    open.className = 'card-button'; open.type = 'button'; open.textContent = '⌨ Terminal';
+    open.title = "The agent's session, here: watch it work, answer what it asks, type to it. Closing it leaves the agent running.";
+    open.addEventListener('click', () => showTerminal(card));
+    actions.append(open);
+  }
+  const openButtons = cardButtons(card, 'open');
+  if (openButtons) actions.append(...openButtons.children);
   // The chat shows questions and results as they come; here only what a card from before chat had.
   const said = (kind) => chatOf(card).some((message) => message.kind === kind);
   const question = agent.question && !said('question') ? agent.question : '';
@@ -1123,12 +1136,14 @@ $('chat-input').addEventListener('keydown', (e) => {
 function showCardMeta(card) {
   $('card-meta').textContent = `Created ${shortDate(card.createdAt)} · Updated ${shortDate(card.updatedAt)}`;
 }
-function closeModal() { overlay.classList.add('hidden'); currentCardId = null; }
+function closeModal() { closeTerminal(); overlay.classList.add('hidden'); currentCardId = null; }
 let overlayPressTarget = null;
 overlay.addEventListener('pointerdown', (e) => { overlayPressTarget = e.target; });
 overlay.addEventListener('click', (e) => { if (e.target === overlay && overlayPressTarget === overlay) closeModal(); });
 $('modal-close').addEventListener('click', closeModal);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.classList.contains('hidden')) closeModal(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !overlay.classList.contains('hidden') && terminalPanel.classList.contains('hidden')) closeModal();
+});
 
 titleInput.addEventListener('change', async () => {
   const card = currentCard(); if (!card) return;
@@ -1541,7 +1556,7 @@ document.addEventListener('focusin', (e) => {
 // field has its own: Escape closes the dialog, Ctrl/Cmd+Enter sends it.
 document.addEventListener('keydown', (e) => {
   const t = e.target;
-  if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA') || t.id === 'input-text') return;
+  if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA') || t.id === 'input-text' || t.closest?.('#terminal-panel')) return;
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault(); e.stopPropagation();
     t.blur(); // apply — every field saves on blur
@@ -1551,6 +1566,82 @@ document.addEventListener('keydown', (e) => {
     t.blur(); // …then exit; the save-on-blur sees no change, so nothing is written
   }
 }, true);
+
+// ---------- a card's terminal ----------
+// The agent's session, over the open card: the board relays it to the helper, which runs it in a
+// pseudo-terminal (terminal.js, helper/driftboard_helper/terminal.py). xterm.js loads the first time.
+let terminalLibrary = null;
+function loadTerminalLibrary() {
+  if (!terminalLibrary) {
+    const load = (src) => new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src; script.onload = resolve; script.onerror = () => reject(new Error(`could not load ${src}`));
+      document.head.append(script);
+    });
+    const css = document.createElement('link');
+    css.rel = 'stylesheet'; css.href = 'vendor/xterm.css';
+    document.head.append(css);
+    terminalLibrary = load('vendor/xterm.js').then(() => load('vendor/addon-fit.js'))
+      .catch((error) => { terminalLibrary = null; throw error; });
+  }
+  return terminalLibrary;
+}
+let terminal = null;   // the open one: {cardId, term, socket, fit, onResize}
+const terminalPanel = $('terminal-panel');
+function closeTerminal() {
+  if (!terminal) return;
+  const { socket, term, onResize } = terminal;
+  terminal = null;
+  window.removeEventListener('resize', onResize);
+  try { socket.close(); } catch { /* closed already */ }
+  term.dispose();
+  terminalPanel.classList.add('hidden');
+}
+async function showTerminal(card) {
+  closeTerminal();
+  try { await loadTerminalLibrary(); } catch (error) { toast(error.message); return; }
+  terminalPanel.classList.remove('hidden');
+  $('terminal-title').textContent = `${card.agent?.name || 'Agent'} · ${card.title}`;
+  const status = (text) => { $('terminal-status').textContent = text; };
+  status('connecting…');
+  const colours = getComputedStyle(document.documentElement);
+  const term = new window.Terminal({
+    cursorBlink: true, fontSize: 13, scrollback: 5000,
+    fontFamily: 'ui-monospace, "DejaVu Sans Mono", "Cascadia Mono", Menlo, monospace',
+    theme: { background: colours.getPropertyValue('--terminal-bg').trim(), foreground: colours.getPropertyValue('--terminal-fg').trim(),
+      cursor: colours.getPropertyValue('--orange').trim() },
+  });
+  const fit = new window.FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open($('terminal-screen'));
+  fit.fit();
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/cards/${encodeURIComponent(card.id)}/terminal`);
+  socket.binaryType = 'arraybuffer';
+  const onResize = () => {
+    fit.fit();
+    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ resize: [term.cols, term.rows] }));
+  };
+  terminal = { cardId: card.id, term, socket, fit, onResize };
+  window.addEventListener('resize', onResize);
+  const encoder = new TextEncoder();
+  term.onData((keys) => { if (socket.readyState === WebSocket.OPEN) socket.send(encoder.encode(keys)); });
+  socket.addEventListener('open', async () => {
+    // The token goes only to a server that proves it is the board, as with every call.
+    try { await askForProof(); } catch (error) { status(error.message); socket.close(); return; }
+    socket.send(JSON.stringify({ token: signInOff ? null : token, cols: term.cols, rows: term.rows }));
+  });
+  socket.addEventListener('message', (event) => {
+    if (typeof event.data !== 'string') { term.write(new Uint8Array(event.data)); return; }
+    let control;
+    try { control = JSON.parse(event.data); } catch { return; }
+    if (control.started) { status(`${control.command || ''} · closing this leaves the agent running`); term.focus(); }
+    if (control.error) { status(control.error); ended = true; }
+    if (control.exited !== undefined) { status('this terminal ended (the agent keeps running): close it, or open it again'); ended = true; }
+  });
+  let ended = false;
+  socket.addEventListener('close', () => { if (terminal?.socket === socket && !ended) status('disconnected (the agent keeps running): close it, or open it again'); });
+}
+$('terminal-close').addEventListener('click', closeTerminal);
 
 // ---------- live updates ----------
 // Another tab or a script may change the board. Each response carries the board's revision.
@@ -1583,7 +1674,8 @@ function busy() {
   const focused = document.activeElement;
   return gesturing() || pendingWrites > 0 || uploading > 0
     || !!openMenuEl || currentBinderId !== null || descEditing || editingAtts.size > 0
-    || (focused && focused.id !== 'chat-input' && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA'));
+    || (focused && focused.id !== 'chat-input' && !focused.closest?.('#terminal-panel')
+      && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA'));
 }
 // The same data gives the same text, whatever order its keys were set in.
 function stableJSON(value) {

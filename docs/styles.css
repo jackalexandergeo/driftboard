@@ -1,4 +1,6 @@
 :root {
+  --terminal-bg: #16191b;
+  --terminal-fg: #e7eaec;
   --orange: #e76125;
   --orange-dark: #cf4f18;
   --gray: #646d72;
@@ -502,3 +504,15 @@ body.att-reordering { cursor: grabbing; user-select: none; -webkit-user-select: 
 .board-notice.warning { background: var(--orange); }
 .board-notice.error { background: var(--red); }
 .board-notice.hidden { display: none; }
+
+/* The agent's terminal: above the open card, as big as the window allows. */
+.agent-actions { display: flex; gap: 6px; margin-left: auto; }
+.terminal-panel {
+  position: fixed; inset: 4vh 4vw; z-index: 120; display: flex; flex-direction: column;
+  background: var(--terminal-bg); border-radius: var(--radius); box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.terminal-head { display: flex; align-items: center; gap: 12px; padding: 8px 12px; color: var(--terminal-fg); font-size: 13px; }
+.terminal-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-status { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-screen { flex: 1; min-height: 0; padding: 4px 8px 8px; }
+@media (max-width: 640px) { .terminal-panel { inset: 0; border-radius: 0; } }
