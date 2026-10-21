@@ -878,7 +878,10 @@ function renderAgent(card) {
 
 // The card's conversation with its agent, like a chat: yours on the right, the agent's on the
 // left (markdown), its questions marked. What you send here reaches the agent through the helper.
+// A script opts a card into the chat with `chat: true` (the helper does, with its buttons);
+// a card that already has messages or an agent shows it anyway.
 const chatOf = (card) => (Array.isArray(card.chat) ? card.chat : []);
+const chatOptedIn = (card) => card.chat === true || card.chatEnabled === true;
 // What the thread shows: whose card, and the ids of the messages drawn, in order. Messages are
 // never edited, so while they are the first ones of the card's chat only the newer ones are added.
 let drawnChat = { cardId: null, ids: [] };
@@ -914,7 +917,7 @@ function chatMessageEl(message) {
 }
 function renderChat(card) {
   const chat = chatOf(card);
-  const show = chat.length > 0 || !!card.agent || (card.buttons || []).some((button) => ['start', 'reply', 'context'].includes(button.id));
+  const show = chat.length > 0 || !!card.agent || chatOptedIn(card);
   $('chat-section').classList.toggle('hidden', !show);
   if (!show) { drawnChat = { cardId: null, ids: [] }; return; }
   const thread = $('chat-thread');
