@@ -36,6 +36,11 @@ test('a script offers the chat on a card with chat: true, kept as chatEnabled be
   assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { chat: false }, board.token)).body.chatEnabled, undefined);
 });
 
+test('the page loads pictures only from the board itself', async () => {
+  const policy = (await fetch(`${board.url}/`)).headers.get('Content-Security-Policy');
+  assert.match(policy, /img-src 'self' data: blob:/);
+});
+
 test('each side writes only as itself', async () => {
   const { cardId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Who says what' }, board.token)).body;
   const token = (await call(board, 'POST', `/api/cards/${cardId}/agent`, {}, board.token)).body.token;

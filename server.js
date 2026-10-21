@@ -384,9 +384,12 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   // Scripts only from the board's own files: should anything slip markup into the page, it cannot
   // run script there (no inline script, no plugins, no <base> to repoint the board's own files).
-  // No other page may frame the board. Styles, fonts and pictures are left alone: the page sets
-  // inline styles, loads its font from Google Fonts and shows blob: and data: pictures (demo).
-  res.set('Content-Security-Policy', "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+  // No other page may frame the board. Pictures only from the board itself (and blob: and data:, the
+  // demo's): markdown an agent or a pinger wrote cannot load an image from elsewhere, whose address
+  // could carry what it read off the board. Styles and fonts are left alone: the page sets inline
+  // styles and loads its font from Google Fonts.
+  res.set('Content-Security-Policy',
+    "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; img-src 'self' data: blob:");
   res.set('X-Frame-Options', 'DENY');
   res.set('Referrer-Policy', 'no-referrer'); // links out of the board do not carry its address
   next();
