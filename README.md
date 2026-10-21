@@ -314,6 +314,19 @@ get the agent buttons; each of those boards needs a Working (or In progress), a 
 a Review column. One agent works at a time by default (`maxAgents`): every agent starts in the
 same project folder.
 
+**Its terminal.** While an agent works, its open card offers its live session:
+
+- **⌨ Terminal** opens it right there, over the card (Linux and macOS): watch it work, answer
+  a command it waits on, type to it as in any terminal. The board passes your keys to the
+  helper, which runs `claude attach` (or Codex's own view, between its turns) for you. Only the
+  board's own page can open it, and with sign-in on it takes the board's token.
+- **↗ Open in a window** opens the same session in your own terminal app, on any desktop:
+  the one in `[terminal] app` (`"terminator"`, or a command such as `["kitty", "--hold",
+  "{command}"]`), else `$TERMINAL`, your system's default terminal, or the first one found;
+  Terminal on macOS, Windows Terminal (or a console) on Windows.
+
+Closing either leaves the agent running. `[terminal] board = false` turns the page's terminal off.
+
 **When an agent waits.** An agent that asks you something turns its card red (Needs you):
 answer with ↩ Reply or in the chat. A Claude agent that waits for your yes on a command (what
 you set to `ask`, below) says so on the card, with the command that opens its session:
@@ -386,6 +399,8 @@ buttons on a card and acts on the presses.
 |---|---|
 | `PATCH /api/cards/<id>` `{"buttons": [{"id", "label", "title"?, "input"?}]}` | the card's buttons (`input`: the button asks for text first). `[]` takes them off |
 | `PATCH /api/cards/<id>` `{"chatEnabled": true}` | show the card's chat box before any agent has spoken |
+| `PATCH /api/cards/<id>` `{"terminalEnabled": true}` | the card's agent has a session the page can open as a terminal (the board relays `/api/cards/<id>/terminal` to the helper's socket) |
+| a button with `"place": "open"` | shown in the open card only; a card takes 5 buttons, at most 3 on its face |
 | `POST /api/cards/<id>/press` `{"button", "text"?}` | what the page sends when the user presses one; the card then carries `pressed: {button, at, text?}` |
 | `PATCH /api/cards/<id>` `{"pressed": null, "pressedAt": "<at>"}` | done with that press: it is cleared only if it is still the same press, so one made meanwhile is not lost |
 | `POST /api/cards/<id>/chat` `{"text", "images"?}` | a message from the user into the card's chat (`images`: ids of png, jpeg, gif or webp attachments on the card) |

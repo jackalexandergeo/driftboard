@@ -71,6 +71,8 @@ Ask one question at a time, offering the default:
    Fetching is always allowed there; pushing follows `push` above.
 8. **Agents at once** (`agent.maxAgents`, default 1). Every agent works in the same project
    folder, so more than one only makes sense for cards that do not edit files there.
+9. **Their terminal app** (`[terminal] app`), for ↗ Open in a window: leave it empty for their
+   system's default, or name the one they use (`"terminator"`, `"kitty"`, …).
 
 ## 4. Install the board
 
@@ -110,6 +112,9 @@ rules = []                          # question 4
 [agent.access]                      # question 5; leave out what stays "deny"
 
 [agent.limits]                      # question 6; leave out what stays "ask"
+
+[terminal]
+app = ""                            # question 9
 ```
 
 Then check it, and start the helper:
@@ -132,8 +137,10 @@ progress shows on the card, its answer in the open card, and the card moves to R
 can write to the agent in the card's chat at any time. When they are happy, they move the card
 to Done, which stops the agent for good.
 
-If the card says the agent is waiting for their yes, they answer in its session
-(`claude attach <id>`, as the card says). If it says it could not start, the card says why.
+While the agent works, the open card offers its terminal: **⌨ Terminal** shows the live
+session over the card, and **↗ Open in a window** opens it in their terminal app. They can
+answer a command it waits on there, or type to it. Closing either leaves the agent running. If
+it says it could not start, the card says why.
 
 ## 7. Their own pinger
 
