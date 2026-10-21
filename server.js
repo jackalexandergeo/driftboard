@@ -773,7 +773,23 @@ app.post('/api/workspaces/:id/cards', (req, res) => {
 const ITEM_BINDERS = ['New', 'Working', 'Needs you', 'Review', 'Done', "Won't do"];
 const ITEM_LIMITS = { title: 200, body: 16000, source: 40, externalId: 200, thread: 200, workspace: 80, column: 80 };
 const SOURCE_NAME = /^[a-z0-9][a-z0-9._-]*$/;
-const MAX_REMEMBERED_ITEMS = 200; // per card: ids of the items it holds, for repeats
+// The ids each source's items came with, newest last, and the card each went to: a repeat is known
+// even once the user deleted its card (a pinger that sends a window of its mailbox again).
+const SEEN_KEPT = 5000; // per source
+function seenItem(source, externalId) {
+  return (state.seenItems?.[source] || []).find(([id]) => id === externalId) || null;
+}
+function rememberItem(source, externalId, cardId) {
+  state.seenItems ??= {};
+  const seen = (state.seenItems[source] || []).filter(([id]) => id !== externalId);
+  seen.push([externalId, cardId]);
+  state.seenItems[source] = seen.slice(-SEEN_KEPT);
+}
+if (!state.seenItems) {   // a board from before the index: what its cards remember
+  for (const ws of state.workspaces) {
+    for (const card of ws.cards) for (const id of card.source?.items || []) rememberItem(card.source.name, id, card.id);
+  }
+}
 
 function itemProblems(item) {
   const problems = [];
@@ -812,16 +828,12 @@ app.post('/api/items', (req, res) => {
   const problems = itemProblems(item);
   if (problems.length) return res.status(400).json({ error: 'invalid item', problems });
   const source = item.source;
-  if (item.externalId) {
-    for (const ws of state.workspaces) {
-      const held = ws.cards.find((c) => c.source?.name === source && c.source.items?.includes(item.externalId));
-      if (held) return res.json({ cardId: held.id, workspaceId: ws.id, created: false, duplicate: true });
-    }
+  const seen = item.externalId && seenItem(source, item.externalId);
+  if (seen) {
+    const held = seen[1] && getCard(seen[1]);   // gone: the user deleted it, and it stays gone
+    return res.json({ cardId: held ? held.card.id : null, workspaceId: held ? held.ws.id : null, created: false, duplicate: true });
   }
-  const remember = (card) => {
-    if (!item.externalId) return;
-    card.source.items = [...(card.source.items || []), item.externalId].slice(-MAX_REMEMBERED_ITEMS);
-  };
+  const remember = (card) => { if (item.externalId) rememberItem(source, item.externalId, card.id); };
   if (item.thread) {
     for (const ws of state.workspaces) {
       const card = ws.cards.find((c) => c.source?.name === source && c.source.thread === item.thread);

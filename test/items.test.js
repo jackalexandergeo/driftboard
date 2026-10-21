@@ -55,6 +55,16 @@ test('the same item twice is one card', async () => {
   assert.deepEqual([again.body.cardId, again.body.duplicate], [first.body.cardId, true]);
 });
 
+test('an item whose card the user deleted is not put back when it comes again', async () => {
+  const first = await send(open, { source: 'mail', externalId: 'm-9', title: 'Newsletter' });
+  await fetch(`${open.url}/api/cards/${first.body.cardId}`, { method: 'DELETE' });
+  const again = await send(open, { source: 'mail', externalId: 'm-9', title: 'Newsletter' });
+  assert.equal(again.status, 200);
+  assert.deepEqual([again.body.duplicate, again.body.cardId], [true, null]);
+  const inbox = await workspace(open, first.body.workspaceId);
+  assert.ok(!inbox.cards.some((each) => each.title === 'Newsletter'));
+});
+
 test('a later item in the same thread joins its card as a note', async () => {
   const first = await send(open, { source: 'chat', thread: 't-1', externalId: 'p-1', title: 'Can you look at the export?' });
   const later = await send(open, { source: 'chat', thread: 't-1', externalId: 'p-2', title: 'Still broken', body: 'since 9am' });
