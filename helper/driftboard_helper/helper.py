@@ -117,6 +117,8 @@ class Helper:
                     cards.append((card, column))
                 except (BoardError, LaunchError) as error:
                     logger.warning("card %s: %s", card.get("id"), error)
+                except Exception:   # one card's surprise must not stop the others
+                    logger.exception("card %s: unexpected error", card.get("id"))
         self._watch()
         for card, column in cards:
             wantedButtons = buttonsFor(self.state["runs"].get(card["id"]), column)
@@ -249,6 +251,7 @@ class Helper:
                                           "startedAt": self._clock(), "turnAt": self._clock(), "seenWorking": False,
                                           "seenChat": seen}
         append(outbox, {"kind": "progress", "text": "%s started" % self.launcher.tool})
+        self._save()   # now: a crash later in the pass must not lose a running agent
         logger.info("card %s: started %s session %s", card["id"], self.launcher.tool, session)
 
     def _writeSettings(self, folder, outbox):
@@ -327,30 +330,36 @@ class Helper:
         for cardId, run in self.state["runs"].items():
             if run.get("state") not in ACTIVE and run.get("state") != "stopped":
                 continue
-            relay = self._relays.get(cardId)
-            if relay is None:
-                relay = self._relays[cardId] = Relay(self.board, cardId, run["token"], run["outbox"], run.get("offset", 0))
-            relay.pump()
-            run["offset"] = relay.offset
-            if relay.closed:
-                self._close(cardId, run)
-                continue
-            listed = (self._states or {}).get(run["session"])
-            if listed and listed[1]:
-                run["fullSession"] = listed[1]
-            if listed and listed[0] == "working":
-                run["seenWorking"] = True
-            settled = (run.get("seenWorking") or not getattr(self.launcher, "listingsLag", False)
-                       or self._clock() - run.get("turnAt", 0) > self.listingGrace)
-            if run["state"] == "working" and listed and listed[0] in TURN_OVER and settled:
-                run["state"] = "idle"   # its turn is over: it asked, finished, or stopped by itself
-            if run["state"] == "idle" and run.get("queued"):
-                message = "\n\n".join(run.pop("queued"))
-                try:
-                    self._wake(cardId, run, message)
-                except LaunchError as error:
-                    run["queued"] = [message]
-                    logger.warning("card %s: could not wake its agent: %s", cardId, error)
+            try:
+                self._watchRun(cardId, run)
+            except Exception:
+                logger.exception("card %s: unexpected error while watching its agent", cardId)
+
+    def _watchRun(self, cardId, run):
+        relay = self._relays.get(cardId)
+        if relay is None:
+            relay = self._relays[cardId] = Relay(self.board, cardId, run["token"], run["outbox"], run.get("offset", 0))
+        relay.pump()
+        run["offset"] = relay.offset
+        if relay.closed:
+            self._close(cardId, run)
+            return
+        listed = (self._states or {}).get(run["session"])
+        if listed and listed[1]:
+            run["fullSession"] = listed[1]
+        if listed and listed[0] == "working":
+            run["seenWorking"] = True
+        settled = (run.get("seenWorking") or not getattr(self.launcher, "listingsLag", False)
+                   or self._clock() - run.get("turnAt", 0) > self.listingGrace)
+        if run["state"] == "working" and listed and listed[0] in TURN_OVER and settled:
+            run["state"] = "idle"   # its turn is over: it asked, finished, or stopped by itself
+        if run["state"] == "idle" and run.get("queued"):
+            message = "\n\n".join(run.pop("queued"))
+            try:
+                self._wake(cardId, run, message)
+            except LaunchError as error:
+                run["queued"] = [message]
+                logger.warning("card %s: could not wake its agent: %s", cardId, error)
 
     def _save(self):
         path = self.statePath + ".new"
@@ -372,6 +381,16 @@ def build(config):
     return Helper(config, board, launcher, stateDirectory())
 
 
+def passSafely(helper):
+    """One pass that never ends the loop: what goes wrong is logged, and the next pass tries again."""
+    try:
+        helper.passOnce()
+    except BoardError as error:
+        logger.warning("the board: %s", error)
+    except Exception:
+        logger.exception("a pass failed")
+
+
 def main(arguments=None):
     parser = argparse.ArgumentParser(prog="driftboard-helper")
     parser.add_argument("command", choices=("run", "once", "check"))
@@ -387,10 +406,7 @@ def main(arguments=None):
         return 0
     helper = build(config)
     while True:
-        try:
-            helper.passOnce()
-        except BoardError as error:
-            logger.warning("the board: %s", error)
+        passSafely(helper)
         if options.command == "once":
             return 0
         time.sleep(config["intervalSeconds"])

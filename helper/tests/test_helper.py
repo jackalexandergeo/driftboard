@@ -10,7 +10,7 @@ import urllib.error
 from driftboard_helper.board import BoardClient, BoardError
 from driftboard_helper.claude import ClaudeLauncher
 from driftboard_helper.config import DEFAULTS
-from driftboard_helper.helper import CONTEXT, REPLY, RESUME, START, STOP, Helper
+from driftboard_helper.helper import CONTEXT, REPLY, RESUME, START, STOP, Helper, passSafely
 
 from .boards import NODE, Board
 
@@ -285,6 +285,41 @@ class HelperTest(unittest.TestCase):
             BoardClient(self.board.url, self.board.tokenFile).request(
                 "PATCH", "/api/agent/cards/%s" % cardId, {"progress": "x"}, cardToken=token)
         self.assertEqual(refused.exception.status, 401)
+
+    def testOneCardsSurpriseDoesNotStopTheOthersOrTheLoop(self):
+        broken, fine = self.item("Broken"), self.item("Fine")
+        chat = self.helper._chat
+
+        def failing(card):
+            if card["id"] == broken:
+                raise KeyError("something the helper did not expect")
+            return chat(card)
+        self.helper._chat = failing
+        with self.assertLogs("driftboard_helper", "ERROR"):
+            self.helper.passOnce()
+        self.assertEqual(self.buttons(fine), [START["id"], CONTEXT["id"]])
+
+        def broke():
+            raise TypeError("an unexpected board reply")
+        self.helper.passOnce = broke
+        with self.assertLogs("driftboard_helper", "ERROR"):
+            passSafely(self.helper)   # logged; the loop goes on
+
+    def testAStartedAgentIsSavedAtOnce(self):
+        cardId = self.item("Saved")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        buttons = self.helper.board.request
+
+        def failingButtons(method, path, body=None, **extra):
+            if method == "PATCH" and body and "buttons" in body:
+                raise RuntimeError("the pass dies after the start")
+            return buttons(method, path, body, **extra)
+        self.helper.board.request = failingButtons
+        with self.assertRaises(RuntimeError):
+            self.helper.passOnce()
+        with open(os.path.join(self.directory.name, "state", "state.json")) as stateFile:
+            self.assertEqual(json.load(stateFile)["runs"][cardId]["state"], "working")
 
     def testACardAlreadyClosedOffersNoAgent(self):
         # Live: cards posted straight into Won't do got ▶ Start.

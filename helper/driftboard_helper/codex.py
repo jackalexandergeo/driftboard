@@ -69,8 +69,11 @@ class CodexLauncher:
         """Start codex in a session of its own (it outlives a helper restart), its output to the run folder."""
         with open(os.path.join(runFolder, "codex.jsonl"), "ab") as log, open(os.path.join(runFolder, "codex.err"), "ab") as errors:
             start = log.tell()
-            process = subprocess.Popen(command, cwd=self.directory, stdin=subprocess.DEVNULL, stdout=log, stderr=errors,
-                                       env=dict(os.environ, **environment), start_new_session=True)
+            try:
+                process = subprocess.Popen(command, cwd=self.directory, stdin=subprocess.DEVNULL, stdout=log, stderr=errors,
+                                           env=dict(os.environ, **environment), start_new_session=True)
+            except OSError as error:   # not installed, or not runnable
+                raise LaunchError("%s could not be run: %s" % (self.command, error))
         self._children[process.pid] = process
         return process, start
 
@@ -99,7 +102,11 @@ class CodexLauncher:
             text = brief.read() + "\n\n" + prompt
         process, start = self._launch([self.command, "exec", "--json"] + self._options(runFolder) + [text], environment,
                                       runFolder)
-        thread = self._threadOf(runFolder, start, process)
+        try:
+            thread = self._threadOf(runFolder, start, process)
+        except LaunchError:
+            self._killGroup(process.pid)   # unregistered, nothing else could stop it
+            raise
         self._remember(thread, process.pid, environment)
         return thread
 
@@ -118,13 +125,18 @@ class CodexLauncher:
         known = self._threads().get(sessionId)
         if not known or not self._alive(known["pid"]):
             return True
+        return self._killGroup(known["pid"])
+
+    def _killGroup(self, pid):
         for wanted in (signal.SIGTERM, signal.SIGKILL):
             try:
-                os.killpg(known["pid"], wanted)
+                os.killpg(pid, wanted)
             except OSError:
                 return True
             for _ in range(50):
-                if not self._alive(known["pid"]):
+                if pid in self._children:
+                    self._children[pid].poll()   # reap our own child, or it lingers as a zombie
+                if not self._alive(pid):
                     return True
                 time.sleep(0.2)
         return False

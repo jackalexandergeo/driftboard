@@ -7,6 +7,7 @@ import time
 import unittest
 
 from driftboard_helper.board import BoardClient
+from driftboard_helper.claude import LaunchError
 from driftboard_helper.codex import CodexLauncher
 from driftboard_helper.config import DEFAULTS
 from driftboard_helper.helper import Helper
@@ -100,6 +101,44 @@ class CodexTest(unittest.TestCase):
                          (first["thread"], "The user replied: October."))
         card = self.board.call("GET", "/api/cards/%s" % cardId)["card"]
         self.assertEqual((self.board.column(cardId), card["agent"]["result"]), ("Review", "**Done**: October"))
+
+
+class CodexLaunchFailureTest(unittest.TestCase):
+    """A codex that is missing, or never announces its thread, is a failed start, not a dead helper."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.run = os.path.join(self.directory.name, "run")
+        os.makedirs(self.run)
+        self.brief = os.path.join(self.directory.name, "brief.md")
+        with open(self.brief, "w") as brief:
+            brief.write("brief")
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def start(self, command):
+        launcher = CodexLauncher(self.directory.name, os.path.join(self.directory.name, "codex.json"), command=command,
+                                 startTimeout=1)
+        return launcher, lambda: launcher.start("x", None, self.brief, "go", {"DRIFTBOARD_RUN": self.run})
+
+    def testAMissingCodexIsALaunchError(self):
+        _launcher, start = self.start(os.path.join(self.directory.name, "no-such-codex"))
+        with self.assertRaises(LaunchError):
+            start()
+
+    def testACodexThatNeverAnnouncesItsThreadIsKilled(self):
+        hanging = os.path.join(self.directory.name, "bin", "codex")
+        os.makedirs(os.path.dirname(hanging))
+        with open(hanging, "w") as script:
+            script.write("#!/bin/sh\nsleep 30\n")
+        os.chmod(hanging, stat.S_IRWXU)
+        launcher, start = self.start(hanging)
+        with self.assertRaises(LaunchError):
+            start()
+        process, = launcher._children.values()
+        self.assertIsNotNone(process.poll())   # not left running where nothing can stop it
+        self.assertEqual(launcher._threads(), {})
 
 
 if __name__ == "__main__":
