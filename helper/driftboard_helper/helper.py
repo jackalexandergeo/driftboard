@@ -42,6 +42,7 @@ REPLY = {"id": "reply", "label": "↩ Reply", "title": "Answer the agent, or sen
          "input": "Your answer, or what to change"}
 CONTEXT = {"id": "context", "label": "＋ Context", "title": "Tell the agent something it should know",
            "input": "What should the agent know? For example what was said in person"}
+OWN_BUTTONS = {button["id"] for button in (START, STOP, RESUME, REPLY, CONTEXT)}
 
 # run states: waiting (context only, not started), working, idle (its turn ended), stopped, closed
 ACTIVE = ("working", "idle")
@@ -61,6 +62,12 @@ def buttonsFor(run, column=None):
     if state == "stopped":
         return [RESUME, REPLY, CONTEXT]
     return [START, CONTEXT]
+
+
+def ours(card):
+    """A card the helper looks after: one with no buttons, or only buttons the helper put there.
+    Another script's buttons and presses are that script's."""
+    return all(isinstance(button, dict) and button.get("id") in OWN_BUTTONS for button in card.get("buttons") or [])
 
 
 def jsonBlock(value):
@@ -112,6 +119,8 @@ class Helper:
             columns = {binder["id"]: binder["title"] for binder in workspace.get("binders") or []}
             for card in workspace.get("cards") or []:
                 column = columns.get(card.get("binderId"))
+                if not ours(card):
+                    continue
                 try:
                     self._card(card, column)
                     cards.append((card, column))
@@ -137,10 +146,27 @@ class Helper:
                 self._close(card["id"], run)
         else:
             pressed = card.get("pressed") or {}
-            if pressed.get("button") and self._press(card, pressed):
-                self.board.request("PATCH", "/api/cards/%s" % card["id"], {"pressed": None})
-                card.pop("buttons", None)   # what the press changed is set at the end of the pass
+            if pressed.get("button") in OWN_BUTTONS:
+                at = pressed.get("at")
+                handled = at is not None and (run or {}).get("handledPress") == at   # done; its clear did not reach the board
+                if handled or self._press(card, pressed):
+                    self._handled(card, pressed)
+                    card.pop("buttons", None)   # what the press changed is set at the end of the pass
             self._chat(card)
+
+    def _handled(self, card, pressed):
+        """A press acted on: remember it (so it is never acted on twice), then clear it on the board,
+        only if it is still that press (one made since stays for the next pass)."""
+        if pressed.get("_cleared"):
+            return
+        run = self.state["runs"].setdefault(card["id"], {"state": "waiting", "contexts": []})
+        run["handledPress"] = pressed.get("at")
+        self._save()
+        pressed["_cleared"] = True
+        try:
+            self.board.request("PATCH", "/api/cards/%s" % card["id"], {"pressed": None, "pressedAt": pressed.get("at")})
+        except BoardError as error:   # remembered as handled: the next pass only clears it
+            logger.warning("card %s: could not clear its press: %s", card["id"], error)
 
     def _press(self, card, pressed):
         """Act on a press; False to leave it for a later pass (more agents running than allowed)."""
@@ -160,10 +186,12 @@ class Helper:
         elif button in ("reply", "context") and not text:
             logger.warning("card %s: %s pressed without text (is the board older than the helper?)", card["id"], button)
         elif button in ("reply", "context"):
-            # into the card's chat, where the user reads it back; this pass delivers it
+            # into the card's chat, where the user reads it back: seen, and the press done, before
+            # the agent is woken, so a wake that fails cannot post it twice
             message = self.board.request("POST", "/api/cards/%s/chat" % card["id"], {"text": text})
-            self._deliver(card["id"], text, "The user replied" if button == "reply" else "The user added context")
             self._seen(card["id"]).append(message["id"])
+            self._handled(card, pressed)
+            self._deliver(card["id"], text, "The user replied" if button == "reply" else "The user added context")
         return True
 
     def _seen(self, cardId):
@@ -296,11 +324,15 @@ class Helper:
                 % (folder, "\n".join("- " + rule for rule in rules), "\n".join("- " + rule for rule in guidance)))
 
     def _tell(self, cardId, run, message):
-        """Wake the agent with a message, or keep it for when its turn ends."""
+        """Wake the agent with a message, or keep it for when its turn ends (or the wake works)."""
         if run.get("state") == "working":
             run.setdefault("queued", []).append(message)
             return
-        self._wake(cardId, run, message)
+        try:
+            self._wake(cardId, run, message)
+        except LaunchError as error:
+            run.setdefault("queued", []).append(message)
+            logger.warning("card %s: could not wake its agent, kept the message for later: %s", cardId, error)
 
     def _wake(self, cardId, run, message):
         self._writeSettings(run["folder"], run["outbox"])   # what the user changed in the config since

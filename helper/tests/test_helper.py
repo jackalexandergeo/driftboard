@@ -26,6 +26,7 @@ class FakeClaude:
         self.sessions = {}
         self.calls = []
         self.staleAfterWake = False   # as `claude agents` did live: still listing the turn before as done
+        self.failResumes = 0   # this many wakes fail, as when claude cannot be run
 
     def __call__(self, command, workingDirectory):
         self.calls.append(command)
@@ -38,6 +39,9 @@ class FakeClaude:
             return 0, "stopped\n", ""
         if command[1:3] == ["--bg", "--resume"]:
             assert len(command) == 5, "a flag on --resume starts a copy"
+            if self.failResumes:
+                self.failResumes -= 1
+                return 1, "", "claude: could not resume"
             key, session = next((key, session) for key, session in self.sessions.items() if session["full"] == command[3])
             session["messages"].append(command[4])
             if self.staleAfterWake:
@@ -320,6 +324,71 @@ class HelperTest(unittest.TestCase):
             self.helper.passOnce()
         with open(os.path.join(self.directory.name, "state", "state.json")) as stateFile:
             self.assertEqual(json.load(stateFile)["runs"][cardId]["state"], "working")
+
+    def testAnotherScriptsButtonsAndPressesAreLeftAlone(self):
+        cardId = self.item("Someone else's")
+        self.board.call("PATCH", "/api/cards/%s" % cardId, {"buttons": [{"id": "approve", "label": "Approve"}]})
+        self.board.call("POST", "/api/cards/%s/press" % cardId, {"button": "approve"})
+        self.helper.passOnce()
+        card = self.card(cardId)
+        self.assertEqual(([button["id"] for button in card["buttons"]], card["pressed"]["button"]), (["approve"], "approve"))
+
+    def recordRequests(self):
+        sent, request = [], self.helper.board.request
+
+        def recording(method, path, body=None, **extra):
+            sent.append((method, path, body))
+            return request(method, path, body, **extra)
+        self.helper.board.request = recording
+        return sent
+
+    def testAPressIsClearedOnlyAsThePressItWas(self):
+        # A press made while the helper worked on the one before must not be wiped with it.
+        cardId = self.item("Two presses")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        at = self.card(cardId)["pressed"]["at"]
+        sent = self.recordRequests()
+        self.helper.passOnce()
+        self.assertIn(("PATCH", "/api/cards/%s" % cardId, {"pressed": None, "pressedAt": at}), sent)
+
+    def testAPressWhoseClearFailedIsNotActedOnTwice(self):
+        cardId = self.item("Clear fails")
+        self.helper.passOnce()
+        self.press(cardId, "context", "Use the new rates.")
+        request = self.helper.board.request
+        failures = [1]
+
+        def failingClear(method, path, body=None, **extra):
+            if method == "PATCH" and body and "pressedAt" in body and failures:
+                failures.pop()
+                raise BoardError("PATCH %s: the board did not answer" % path)
+            return request(method, path, body, **extra)
+        self.helper.board.request = failingClear
+        self.helper.passOnce()   # posted to the chat, then the clear fails
+        self.helper.passOnce()   # the same press again: only cleared
+        chat = [message["text"] for message in self.card(cardId)["chat"]]
+        self.assertEqual(chat, ["Use the new rates."])
+        self.assertNotIn("pressed", self.card(cardId))
+        self.assertEqual(self.helper.state["runs"][cardId]["contexts"], ["Use the new rates."])
+
+    def testAReplyWhoseWakeFailsIsPostedOnceAndReachesTheAgentLater(self):
+        cardId = self.item("Wake fails")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        self.now += 31
+        self.helper.passOnce()
+        self.claude.failResumes = 1
+        self.press(cardId, "reply", "The 2026 ledger.")
+        self.helper.passOnce()   # the wake fails: kept
+        self.assertNotIn("pressed", self.card(cardId))
+        self.helper.passOnce()   # and delivered once it works
+        session = next(iter(self.claude.sessions.values()))
+        self.assertEqual(session["messages"], ["The user replied: The 2026 ledger."])
+        chat = [message["text"] for message in self.card(cardId)["chat"] if message["from"] == "user"]
+        self.assertEqual(chat, ["The 2026 ledger."])
 
     def testACardAlreadyClosedOffersNoAgent(self):
         # Live: cards posted straight into Won't do got ▶ Start.
