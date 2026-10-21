@@ -895,10 +895,26 @@ function renderChat(card) {
     const who = message.from === 'user' ? 'You' : (message.name || 'agent');
     const what = message.kind === 'question' ? ' asks' : message.kind === 'result' ? ' · result' : '';
     meta.textContent = `${who}${what} · ${shortDate(message.at)}`;
-    const body = document.createElement('div');
-    if (message.from === 'user') { body.className = 'chat-body plain'; body.textContent = message.text; }
-    else { body.className = 'chat-body markdown'; body.innerHTML = renderMarkdown(message.text); }
-    row.append(meta, body);
+    row.append(meta);
+    if (message.text) {
+      const body = document.createElement('div');
+      if (message.from === 'user') { body.className = 'chat-body plain'; body.textContent = message.text; }
+      else { body.className = 'chat-body markdown'; body.innerHTML = renderMarkdown(message.text); }
+      row.append(body);
+    }
+    if (message.images?.length) {
+      const pictures = document.createElement('div');
+      pictures.className = 'chat-pictures';
+      for (const image of message.images) {
+        const link = document.createElement('a');
+        link.href = fileUrl(image); link.target = '_blank'; link.rel = 'noopener';
+        const img = document.createElement('img');
+        img.src = fileUrl(image); img.alt = image.name || 'picture'; img.loading = 'lazy';
+        link.append(img);
+        pictures.append(link);
+      }
+      row.append(pictures);
+    }
     thread.append(row);
   }
   if (!chat.length) {
@@ -911,22 +927,71 @@ function renderChat(card) {
   $('chat-status').textContent = working ? `🤖 ${card.agent.progress}` : '';
   if (!sameCard || atBottom) thread.scrollTop = thread.scrollHeight;
   thread.dataset.card = card.id;
+  renderChatPending();
+}
+// Pictures for the next message: uploaded to the card as they are added (so they are in its
+// attachments too), sent with the message. Only kinds an agent can look at.
+const CHAT_PICTURE = /^image\/(png|jpeg|gif|webp)$/;
+let chatPending = [];   // [{cardId, attachment}]
+async function addChatPictures(files) {
+  const card = currentCard(); if (!card) return;
+  for (const file of files) {
+    if (!CHAT_PICTURE.test(file.type)) { toast(`${file.name || 'That file'}: only png, jpeg, gif or webp pictures go in the chat`); continue; }
+    const form = new FormData();
+    form.append('file', file, file.name || `pasted.${file.type.split('/')[1]}`);
+    try {
+      const attachment = await api('POST', `/api/cards/${card.id}/attachments`, form, true);
+      addToCard(card.id, attachment);
+      chatPending.push({ cardId: card.id, attachment });
+    } catch (e) { toast(`${file.name}: ${e.message}`); }
+  }
+  if (currentCardId === card.id) { renderAttachments(); renderChatPending(); }
+  renderWorkspace();   // the card's attachment count
+}
+function renderChatPending() {
+  const card = currentCard();
+  const box = $('chat-pending');
+  const mine = chatPending.filter((pending) => card && pending.cardId === card.id);
+  box.classList.toggle('hidden', !mine.length);
+  box.innerHTML = '';
+  for (const pending of mine) {
+    const chip = document.createElement('div');
+    chip.className = 'chat-pending-item';
+    const img = document.createElement('img');
+    img.src = fileUrl(pending.attachment); img.alt = pending.attachment.originalName || 'picture';
+    const remove = document.createElement('button');
+    remove.type = 'button'; remove.className = 'chat-pending-remove'; remove.textContent = '✕';
+    remove.title = 'Leave it out of the message (it stays in the attachments)';
+    remove.addEventListener('click', () => { chatPending = chatPending.filter((each) => each !== pending); renderChatPending(); });
+    chip.append(img, remove);
+    box.append(chip);
+  }
 }
 async function sendChat() {
   const card = currentCard();
   const input = $('chat-input');
   const text = input.value.trim();
-  if (!card || !text) return;
+  const pictures = chatPending.filter((pending) => card && pending.cardId === card.id);
+  if (!card || (!text && !pictures.length)) return;
   $('chat-send').disabled = true;
   try {
-    const message = await api('POST', `/api/cards/${card.id}/chat`, { text });
+    const images = pictures.map((pending) => pending.attachment.id);
+    const message = await api('POST', `/api/cards/${card.id}/chat`, { text, ...(images.length ? { images } : {}) });
     card.chat = [...(card.chat || []), message];
     input.value = '';
+    chatPending = chatPending.filter((pending) => !pictures.includes(pending));
     renderChat(card);
   } catch (err) { toast(err.message); }
   finally { $('chat-send').disabled = false; input.focus(); }
 }
 $('chat-send').addEventListener('click', sendChat);
+$('chat-attach').addEventListener('click', () => $('chat-file').click());
+$('chat-file').addEventListener('change', async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  await addChatPictures(files);
+  $('chat-input').focus();
+});
 $('chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); }
 });
@@ -1216,10 +1281,14 @@ addDrop.addEventListener('click', async () => {
     await afterAttachmentsAdded([att.id]);
   } catch (e) { toast(e.message); }
 });
+// Pasted or dropped in the chat, a picture goes with the next message; elsewhere, to the attachments.
+const inChat = (target) => !$('chat-section').classList.contains('hidden') && !!target?.closest?.('#chat-section');
 document.addEventListener('paste', (e) => {
   if (overlay.classList.contains('hidden')) return;
   const files = [...(e.clipboardData?.items || [])].filter((i) => i.kind === 'file').map((i) => i.getAsFile()).filter(Boolean);
-  if (files.length) { e.preventDefault(); uploadFiles(files); }
+  if (!files.length) return;
+  e.preventDefault();
+  if (inChat(e.target)) addChatPictures(files); else uploadFiles(files);
 });
 ['dragenter', 'dragover'].forEach((evt) => modal.addEventListener(evt, (e) => {
   if (e.dataTransfer?.types?.includes('Files') || e.dataTransfer?.types?.includes('text/uri-list')) { e.preventDefault(); addDrop.classList.add('dragover'); }
@@ -1228,6 +1297,7 @@ modal.addEventListener('dragleave', (e) => { if (e.target === modal) addDrop.cla
 modal.addEventListener('drop', async (e) => {
   addDrop.classList.remove('dragover');
   const dt = e.dataTransfer; if (!dt) return;
+  if (dt.files && dt.files.length && inChat(e.target)) { e.preventDefault(); addChatPictures([...dt.files]); return; }
   if (dt.files && dt.files.length) { e.preventDefault(); uploadFiles(dt.files); return; }
   const uri = dt.getData('text/uri-list') || dt.getData('text/plain');
   if (uri && /^https?:\/\//i.test(uri.trim())) { e.preventDefault(); const att = await addJsonAttachment({ type: 'url', url: uri.trim() }); await afterAttachmentsAdded([att.id]); }

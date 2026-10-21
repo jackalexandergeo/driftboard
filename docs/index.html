@@ -102,7 +102,10 @@
         <div class="section-head"><h3>Chat with the agent</h3></div>
         <div id="chat-thread" class="chat-thread"></div>
         <div id="chat-status" class="chat-status"></div>
+        <div id="chat-pending" class="chat-pending hidden"></div>
         <div class="chat-composer">
+          <button class="btn-ghost chat-attach" id="chat-attach" type="button" title="Add a picture (or paste or drop one here)" aria-label="Add a picture">📎</button>
+          <input type="file" id="chat-file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
           <textarea id="chat-input" class="text-area chat-input" rows="2" placeholder="Message the agent… (Enter sends, Shift+Enter for a new line)"></textarea>
           <button class="btn-primary" id="chat-send" type="button">Send</button>
         </div>
