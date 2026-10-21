@@ -688,11 +688,14 @@ app.get('/api/session', (req, res) => {
 });
 
 // ---- Workspaces ----
+// The boards' names, and the revision: a script that polls can read the boards again only when it
+// moved (every change moves it; the X-Board-Revision header of every answer carries it too).
 app.get('/api/state', (req, res) => {
   res.json({
     activeWorkspaceId: state.activeWorkspaceId,
     workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name })),
     notice: state.notice || null,
+    revision,
   });
 });
 

@@ -51,6 +51,15 @@ test('an item becomes a card in the first column of the Inbox, made with the wor
   assert.equal(inbox.binders.find((binder) => binder.id === made.binderId).title, 'New');
 });
 
+test("the board's revision moves with every change, for a script that polls", async () => {
+  const before = (await (await fetch(`${open.url}/api/state`)).json()).revision;
+  await send(open, { source: 'ci', title: 'A change' });
+  const after = await fetch(`${open.url}/api/state`);
+  const { revision } = await after.json();
+  assert.ok(revision > before);
+  assert.equal(Number(after.headers.get('X-Board-Revision')), revision);
+});
+
 test('the same item twice is one card', async () => {
   const first = await send(open, { source: 'mail', externalId: 'm-7', title: 'Invoice 7 is wrong' });
   const again = await send(open, { source: 'mail', externalId: 'm-7', title: 'Invoice 7 is wrong' });
