@@ -23,9 +23,11 @@ async function waitFor(check) {
 test('a burst of changes is written compactly, and the copy before the last write is kept', async () => {
   const running = await startBoard(false);
   try {
-    await Promise.all(Array.from({ length: 30 }, (_, number) =>
-      call(running, 'POST', '/api/items', { source: 'burst', title: `Item ${number}` })));
     const file = path.join(running.data, 'board.json');
+    await call(running, 'POST', '/api/items', { source: 'burst', title: 'First' });
+    await waitFor(() => fs.existsSync(file));   // a board.json for the burst's write to keep as .bak
+    await Promise.all(Array.from({ length: 29 }, (_, number) =>
+      call(running, 'POST', '/api/items', { source: 'burst', title: `Item ${number}` })));
     await waitFor(() => {
       try { return JSON.parse(fs.readFileSync(file, 'utf8')).workspaces.some((w) => w.cards.length === 30); } catch { return false; }
     });
