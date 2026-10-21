@@ -346,6 +346,12 @@ class HelperTest(unittest.TestCase):
         self.helper.board.request = recording
         return sent
 
+    def testTheHelpersCardsOpenTheirChat(self):
+        cardId = self.item("Chat with me")
+        sent = self.recordRequests()
+        self.helper.passOnce()
+        self.assertIn(("PATCH", "/api/cards/%s" % cardId, {"buttons": [START, CONTEXT], "chatEnabled": True}), sent)
+
     def testAPressIsClearedOnlyAsThePressItWas(self):
         # A press made while the helper worked on the one before must not be wiped with it.
         cardId = self.item("Two presses")

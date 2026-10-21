@@ -132,8 +132,10 @@ class Helper:
         for card, column in cards:
             wantedButtons = buttonsFor(self.state["runs"].get(card["id"]), column)
             if (card.get("buttons") or []) != wantedButtons:
+                # chatEnabled: the board shows the card's chat box (what the user writes there reaches the agent)
+                change = dict({"buttons": wantedButtons}, **({"chatEnabled": True} if wantedButtons else {}))
                 try:
-                    self.board.request("PATCH", "/api/cards/%s" % card["id"], {"buttons": wantedButtons})
+                    self.board.request("PATCH", "/api/cards/%s" % card["id"], change)
                 except BoardError as error:
                     logger.warning("card %s: %s", card["id"], error)
         self._save()
