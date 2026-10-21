@@ -1,0 +1,4 @@
+#!/bin/sh
+# Starts agents on board cards and keeps the cards current (see driftboard_helper/helper.py).
+here="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHONPATH="$here" exec python3 -P -m driftboard_helper.helper "$@"
