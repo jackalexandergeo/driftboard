@@ -160,37 +160,45 @@ class UsageMeter:
         self.fetchSeconds, self.readSeconds = fetchSeconds, readSeconds
         self.utilization = None   # percent of the 5-hour limit used, or None while not known
         self.resetsAt = None      # epoch seconds, or None (the window then is the last 5 hours)
+        self._weightAtFetch = 0.0   # every call's weight in the window when the endpoint last answered
         self._fetchAfter = self._readAt = None
+
+    def _over(self):
+        return self.resetsAt is not None and self._clock() >= self.resetsAt
 
     def refresh(self):
         """Ask the endpoint and read the transcripts when each is due; on a failed ask keep the
-        last answer rather than guess."""
+        last answer rather than guess. Until one answer came, a failed ask is tried again soon."""
         now = self._clock()
-        if self._fetchAfter is None or now >= self._fetchAfter:
-            self._fetchAfter = now + self.fetchSeconds
+        if self._fetchAfter is None or now >= self._fetchAfter or self._over():
             try:
                 window = (self._fetch() or {}).get("five_hour") or {}
                 utilization = window.get("utilization")
                 self.utilization = utilization if isinstance(utilization, (int, float)) else None
                 self.resetsAt = epochSeconds(window.get("resets_at")) if window.get("resets_at") else None
-            except urllib.error.HTTPError as error:
-                if error.code == 429:
-                    retryAfter = error.headers.get("Retry-After") if error.headers else None
-                    self._fetchAfter = now + max(THROTTLED_SECONDS, int(retryAfter) if str(retryAfter).isdigit() else 0)
-                logger.warning("could not read Claude usage: %s", error)
+                self._fetchAfter = now + self.fetchSeconds
+                self._readAt = now
+                self.ledger.refresh()   # now: what the transcripts held when the endpoint answered
+                self._weightAtFetch = self.ledger.weight(self._since())
             except (OSError, ValueError) as error:
+                throttled = isinstance(error, urllib.error.HTTPError) and error.code == 429
+                known = self.utilization is not None and not self._over()
+                self._fetchAfter = now + (THROTTLED_SECONDS if throttled and known else READ_SECONDS)
                 logger.warning("could not read Claude usage: %s", error)
         if self._readAt is None or now - self._readAt >= self.readSeconds:
             self._readAt = now
             self.ledger.refresh()
 
+    def _since(self):
+        return (self.resetsAt or self._clock()) - WINDOW_SECONDS
+
     def ofLimit(self, sessionIds):
         """Percent of the 5-hour limit these sessions used in the current window, or None while
-        the window's utilization is not known."""
-        if self.utilization is None:
+        the window's utilization is not known. Between answers the limit's share of a unit of
+        weight is the one at the last answer, so calls made since count in full."""
+        if self.utilization is None or self._over():
             return None
-        since = (self.resetsAt or self._clock()) - WINDOW_SECONDS
-        total = self.ledger.weight(since)
-        if not total:
-            return 0.0
-        return round(self.ledger.weight(since, self.ledger.sessionFiles(sessionIds)) / total * self.utilization, 1)
+        since = self._since()
+        weight = self.ledger.weight(since, self.ledger.sessionFiles(sessionIds))
+        total = self._weightAtFetch or self.ledger.weight(since)
+        return round(weight / total * self.utilization, 1) if total else 0.0

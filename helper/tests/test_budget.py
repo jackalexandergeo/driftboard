@@ -74,19 +74,53 @@ class UsageMeterTest(unittest.TestCase):
         self.meter.refresh()
         self.assertIsNone(self.meter.ofLimit(["aaaaaaaa"]))
 
-    def testA429WaitsFifteenMinutesBeforeAskingAgain(self):
-        asked = []
-
-        def busy():
+    def busy(self, asked):
+        def fetch():
             asked.append(self.now)
             raise urllib.error.HTTPError(USAGE_URL, 429, "Too Many Requests", None, None)
-        self.meter._fetch = busy
+        return fetch
+
+    def testUntilTheFirstAnswerA429IsAskedAgainAfterAMinute(self):
+        asked = []
+        self.meter._fetch = self.busy(asked)
         self.meter.refresh()
+        self.now += 59
+        self.meter.refresh()
+        self.now += 1
+        self.meter.refresh()
+        self.assertEqual(len(asked), 2)
+
+    def testOnceKnownA429WaitsFifteenMinutes(self):
+        self.meter.refresh()
+        asked = []
+        self.meter._fetch = self.busy(asked)
         self.now += 300
         self.meter.refresh()
         self.now += 600
         self.meter.refresh()
+        self.now += 300
+        self.meter.refresh()
         self.assertEqual(len(asked), 2)
+        self.assertEqual(self.meter.utilization, 40)   # the last answer stays
+
+    def testCallsSinceTheLastAnswerCountInFull(self):
+        self.meter.refresh()
+        self.meter._fetch = self.busy([])
+        path = os.path.join(self.directory.name, "-home-someone-work", "aaaaaaaa-agent.jsonl")
+        with open(path, "a") as transcript:
+            transcript.write(call("claude-sonnet-5-5", "2027-01-15T08:59:00Z", 6000, "four"))
+        self.now += 60
+        os.utime(path, (self.now, self.now))
+        self.meter.refresh()
+        # the window's 90000 at the answer stood for 40%: the agent's 30000 + 90000 since stand for 53.3%
+        self.assertEqual(self.meter.ofLimit(["aaaaaaaa"]), round(120000 / 90000 * 40, 1))
+
+    def testAnAnswerFromAWindowThatEndedIsNotUsed(self):
+        self.meter.refresh()
+        self.meter._fetch = self.busy([])
+        self.now = epochSeconds("2027-01-15T10:00:01Z")
+        self.meter.refresh()
+        self.assertIsNone(self.meter.ofLimit(["aaaaaaaa"]))
 
     def testUseBeforeTheWindowDoesNotCount(self):
         self.windows["five_hour"]["resets_at"] = "2027-01-15T13:01:00Z"   # the window opened at 08:01
