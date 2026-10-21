@@ -584,6 +584,13 @@ function makeCardEl(card, free) {
   if (preview) descEl.textContent = preview; else descEl.remove();
   const buttons = cardButtons(card);
   if (buttons) el.insertBefore(buttons, el.querySelector('.card-badges, .card-thumbs'));
+  if (card.terminalEnabled && !DEMO) {   // the agent's session, straight from the board
+    const open = document.createElement('button');
+    open.type = 'button'; open.className = 'card-terminal'; open.textContent = '⌨ Terminal';
+    open.title = "Open the agent's session: watch it work, answer it, type to it";
+    open.addEventListener('click', (e) => { e.stopPropagation(); showTerminal(card); });
+    el.insertBefore(open, el.querySelector('.card-badges, .card-thumbs'));
+  }
 
   const actions = document.createElement('div');
   actions.className = 'card-actions';
@@ -1603,6 +1610,8 @@ async function showTerminal(card) {
   try { await loadTerminalLibrary(); } catch (error) { toast(error.message); return; }
   terminalPanel.classList.remove('hidden');
   $('terminal-title').textContent = `${card.agent?.name || 'Agent'} · ${card.title}`;
+  // Pop out: the same session in a window of the user's terminal app (the helper opens it).
+  $('terminal-popout').classList.toggle('hidden', !(card.buttons || []).some((button) => button.id === 'terminal'));
   const status = (text) => { $('terminal-status').textContent = text; };
   status('connecting…');
   const colours = getComputedStyle(document.documentElement);
@@ -1643,6 +1652,15 @@ async function showTerminal(card) {
   socket.addEventListener('close', () => { if (terminal?.socket === socket && !ended) status('disconnected (the agent keeps running): close it, or open it again'); });
 }
 $('terminal-close').addEventListener('click', closeTerminal);
+$('terminal-popout').addEventListener('click', async () => {
+  if (!terminal) return;
+  const { cardId } = terminal;
+  try {
+    await api('POST', `/api/cards/${cardId}/press`, { button: 'terminal' });
+    toast('Opening it in a terminal window: the agent keeps running');
+    closeTerminal();
+  } catch (error) { toast(error.message); }
+});
 // A card whose agent has not started: start it and open its terminal at once.
 function renderStartInTerminal(card) {
   const actions = $('chat-actions');

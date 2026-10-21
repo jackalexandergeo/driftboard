@@ -325,7 +325,10 @@ same project folder.
   "{command}"]`), else `$TERMINAL`, your system's default terminal, or the first one found;
   Terminal on macOS, Windows Terminal (or a console) on Windows.
 
-Closing either leaves the agent running. `[terminal] board = false` turns the page's terminal off.
+A card whose agent has a session also carries a **⌨ Terminal** chip on the board itself, which
+opens the terminal without opening the card; in the terminal, **↗ Pop out** moves it to a window
+of your terminal app. Closing either leaves the agent running. `[terminal] board = false` turns
+the page's terminal off.
 
 **When an agent waits.** An agent that asks you something turns its card red (Needs you):
 answer with ↩ Reply or in the chat. A Claude agent that waits for your yes on a command (what
