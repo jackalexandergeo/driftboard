@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Install the board's and the helper's systemd user units (they start with your session) and, if
+# there is none yet, the helper's starter config. Starts nothing: the last lines say how.
+#
+#   ./install-service               the board and the helper
+#   ./install-service --no-helper   the board alone (a plain board, no agents)
+#   ./install-service --no-sign-in  a board without sign-in, for a machine nobody else logs into
+#   ./install-service --force       also replace units this script did not write
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+helper=yes signIn=on force=no
+for argument in "$@"; do
+    case "$argument" in
+        --no-helper) helper=no ;;
+        --no-sign-in) signIn=off ;;
+        --force) force=yes ;;
+        *) echo "usage: $0 [--no-helper] [--no-sign-in] [--force]" >&2; exit 2 ;;
+    esac
+done
+data="${DRIFTBOARD_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/driftboard}"
+units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+config="${XDG_CONFIG_HOME:-$HOME/.config}/driftboard-helper/config.toml"
+marker="# written by driftboard install-service"
+warn() { echo "warning: $*" >&2; }
+
+node="$(command -v node || true)"
+if [ -z "$node" ] || ! "$node" -e 'process.exit(+process.versions.node.split(".")[0] >= 18 ? 0 : 1)'; then
+    echo "the board needs Node.js 18 or later as node: install it, then run this again" >&2; exit 1
+fi
+[ -d "$here/node_modules" ] || warn "no node_modules in $here: run 'npm install' there first"
+if [ "$helper" = yes ]; then
+    python="$(command -v python3 || true)"
+    if [ -z "$python" ] || ! "$python" -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+        echo "the helper needs Python 3.11 or later as python3 (or run with --no-helper for the board alone)" >&2; exit 1
+    fi
+    command -v claude >/dev/null || command -v codex >/dev/null \
+        || warn "neither claude nor codex is on PATH: install Claude Code or Codex and sign in, then run this again (the helper's unit takes its PATH from this shell)"
+    if [ ! -f "$config" ]; then
+        mkdir -p "$(dirname "$config")"
+        sed "s|^tokenFile = .*|tokenFile = \"$data/token\"   # the board's data folder (DRIFTBOARD_DATA)|" \
+            "$here/helper/config.example.toml" > "$config.new"
+        chmod 0600 "$config.new" && mv "$config.new" "$config"
+        echo "wrote $config: set agent.directory, the project folder agents work in"
+    fi
+fi
+
+if ! systemctl --user show-environment >/dev/null 2>&1; then
+    echo "There is no systemd user session here (WSL, a container, macOS?), so no unit was installed."
+    echo "Run them by hand, each in its own terminal:"
+    echo "  DRIFTBOARD_DATA=\"$data\"$( [ "$signIn" = off ] && echo " DRIFTBOARD_SIGN_IN=off") node \"$here/server.js\""
+    [ "$helper" = yes ] && echo "  \"$here/helper/bin/driftboard-helper\" run"
+    exit 0
+fi
+
+# In a unit, % starts a specifier and a value with spaces needs quotes.
+quoted() { printf '"%s"' "$(printf '%s' "$1" | sed 's/%/%%/g; s/\\/\\\\/g; s/"/\\"/g')"; }
+escaped() { printf '%s' "$1" | sed 's/%/%%/g'; }
+write() {   # write <unit> <content>: a unit someone else wrote is kept, unless --force
+    local file="$units/$1"
+    if [ -f "$file" ] && ! grep -qF "$marker" "$file" && [ "$force" = no ]; then
+        echo "kept your $file (run with --force to replace it)"
+        return
+    fi
+    printf '%s\n' "$2" > "$file"
+    echo "installed $file"
+}
+mkdir -p "$units"
+write driftboard.service "$marker
+[Unit]
+Description=driftboard: a kanban board on this machine
+Documentation=file://$(escaped "$here")/README.md
+
+[Service]
+Type=simple
+WorkingDirectory=$(escaped "$here")
+ExecStart=$(quoted "$node") $(quoted "$here/server.js")
+Environment=$(quoted "DRIFTBOARD_DATA=$data")$( [ "$signIn" = off ] && printf '\nEnvironment=DRIFTBOARD_SIGN_IN=off')
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target"
+if [ "$helper" = yes ]; then
+    # The helper's PATH: where claude, codex and python3 are now (nvm and ~/.local/bin are not on systemd's).
+    path=""
+    for tool in claude codex python3; do
+        found="$(command -v "$tool" || true)"
+        [ -n "$found" ] && path="$path:$(dirname "$found")"
+    done
+    path="$(printf '%s' "${path#:}:/usr/local/bin:/usr/bin:/bin" | tr ':' '\n' | awk 'NF && !seen[$0]++' | paste -sd:)"
+    write driftboard-helper.service "$marker
+[Unit]
+Description=driftboard helper: starts AI agents (Claude Code, Codex) on board cards
+Documentation=file://$(escaped "$here")/README.md
+After=driftboard.service
+
+[Service]
+Type=simple
+ExecStart=$(quoted "$here/helper/bin/driftboard-helper") run
+Environment=$(quoted "PATH=$path")
+# The agents are processes of their own: stopping or restarting the helper must not stop them.
+KillMode=process
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target"
+fi
+systemctl --user daemon-reload
+echo
+echo "Next:"
+echo "  systemctl --user enable --now driftboard           # the board, now and at every login"
+[ "$signIn" = on ] && echo "  npm --prefix \"$here\" run open                     # open it in your browser, signed in"
+echo "  \"$here/pinger/driftboard-ping\" \"Try an agent\"      # your first card (this makes the Inbox)"
+if [ "$helper" = yes ]; then
+    echo "  \$EDITOR \"$config\"   # set agent.directory"
+    echo "  \"$here/helper/bin/driftboard-helper\" check        # says what is missing, if anything"
+    echo "  systemctl --user enable --now driftboard-helper    # the helper: ▶ Start on the Inbox's cards"
+fi
+echo "Logs: journalctl --user -f -u driftboard$( [ "$helper" = yes ] && echo " -u driftboard-helper")"
