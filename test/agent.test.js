@@ -146,6 +146,18 @@ test("the starter board's Completed is closed too", async () => {
   assert.equal((await call(board, 'PATCH', `/api/agent/cards/${card.id}`, { progress: 'still here' }, token)).status, 409);
 });
 
+test('an agent changing code moves to Coding, or Clauding; a board without either keeps it in Working', async () => {
+  const { cardId, workspaceId } = (await call(board, 'POST', '/api/items',
+    { source: 'test', title: 'Write the code', workspace: 'Coding board' }, board.token)).body;
+  const token = await agentFor(cardId);
+  assert.equal((await call(board, 'POST', `/api/agent/cards/${cardId}/move`, { column: 'Coding' }, token)).status, 200);
+  assert.equal(await columnOf(cardId, workspaceId), 'Working');   // the starter columns have no coding one
+  const binder = (await call(board, 'POST', `/api/workspaces/${workspaceId}/binders`, { title: 'Clauding', x: 900, y: 40 }, board.token)).body;
+  assert.ok(binder);
+  await call(board, 'POST', `/api/agent/cards/${cardId}/move`, { column: 'Coding' }, token);
+  assert.equal(await columnOf(cardId, workspaceId), 'Clauding');
+});
+
 test('only a holder of the board token mints a card token', async () => {
   const { cardId } = await newCard('Mint');
   assert.equal((await call(board, 'POST', `/api/cards/${cardId}/agent`, {})).status, 401);

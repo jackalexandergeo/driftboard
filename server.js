@@ -523,15 +523,18 @@ app.post('/api/pin', express.json({ limit: '1kb' }), (req, res) => {
 // below). With it the agent keeps its card current: progress, notes, a question for the user,
 // its result, and moves between the working columns. It can never reach another card, move
 // one to Done or Won't do, press a button or start anything: those are the user's.
-const AGENT_COLUMNS = ['Working', 'Needs you', 'Review'];
+const AGENT_COLUMNS = ['Working', 'Coding', 'Needs you', 'Review'];
 // A board may call its working columns otherwise (kept from another tool, say): each of the agent's
-// three is the first of these names the board has.
+// columns is the first of these names the board has. Coding (the agent is changing code) is
+// optional: a board without such a column keeps the card in Working.
 const AGENT_COLUMN_NAMES = {
   Working: ['Working', 'Researching', 'In progress', 'In Progress', 'Doing'],
+  Coding: ['Coding', 'Clauding', 'In development', 'Development'],
   'Needs you': ['Needs you', 'Blocked'],
   Review: ['Review', 'Proposed', 'In review', 'Reviewing'],
 };
 const agentColumn = (ws, column) => (AGENT_COLUMN_NAMES[column] || [])
+  .concat(column === 'Coding' ? AGENT_COLUMN_NAMES.Working : [])
   .map((name) => ws.binders.find((binder) => binder.title === name)).find(Boolean) || null;
 const CLOSED_COLUMNS = ['Done', "Won't do", 'Completed'];   // Completed: the starter board's own
 const AGENT_LIMITS = { progress: 300, question: 2000, result: 20000, content: 20000, text: 8000 };
@@ -644,7 +647,7 @@ agentApi.post('/cards/:id/chat', (req, res) => {   // {text}: the agent says som
   persist();
   res.status(201).json(message);
 });
-agentApi.post('/cards/:id/move', (req, res) => {   // {column}: Working, Needs you or Review
+agentApi.post('/cards/:id/move', (req, res) => {   // {column}: Working, Coding, Needs you or Review
   const found = agentCard(req, res); if (!found) return;
   const { ws, card } = found;
   const column = typeof req.body?.column === 'string' ? req.body.column.trim() : '';

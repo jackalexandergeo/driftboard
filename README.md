@@ -387,7 +387,7 @@ curl -s -X PATCH http://127.0.0.1:4321/api/agent/cards/<id> -H @card-token-heade
 | `POST /api/agent/cards/<id>/chat` | `{"text"}`: a message in the card's chat |
 | `POST /api/agent/cards/<id>/notes` | `{"content"}`: a note on the card, marked with the agent's name |
 | `POST /api/agent/cards/<id>/ask` | `{"question"}`: the card moves to Needs you and shows the question |
-| `POST /api/agent/cards/<id>/move` | `{"column"}`: Working, Needs you or Review only (or what the board calls them: In progress, Blocked, Proposed, …) |
+| `POST /api/agent/cards/<id>/move` | `{"column"}`: Working, Coding, Needs you or Review only (or what the board calls them: In progress, Clauding, Blocked, Proposed, …). Coding is for an agent changing code; a board without such a column keeps the card in Working |
 
 A card token reaches no other card and nothing else on the board: it cannot move a card to
 Done, Won't do or Completed, press its buttons or start anything, which are the user's. Once

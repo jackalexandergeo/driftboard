@@ -25,10 +25,12 @@ class OutboxTest(unittest.TestCase):
     def testWhatTheAgentReportsIsReadOnceInOrder(self):
         self.assertEqual(self.agent("progress", "reading 12 invoices").returncode, 0)
         self.assertEqual(self.agent("result", "-", stdin="**2 mismatches**\n").returncode, 0)
+        self.assertEqual(self.agent("move", "Coding").returncode, 0)   # now changing code
         self.assertEqual(self.agent("move", "Review").returncode, 0)
         reader = OutboxReader(self.path)
         self.assertEqual([(entry["kind"], entry.get("text") or entry.get("column")) for entry, _offset in reader.read()],
-                         [("progress", "reading 12 invoices"), ("result", "**2 mismatches**"), ("move", "Review")])
+                         [("progress", "reading 12 invoices"), ("result", "**2 mismatches**"), ("move", "Coding"),
+                          ("move", "Review")])
         reader.offset = reader.read()[-1][1]
         self.assertEqual(reader.read(), [])
 
