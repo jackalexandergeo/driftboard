@@ -784,6 +784,7 @@ function itemProblems(item) {
     else if (value.length > limit) problems.push(`${field} is longer than ${limit} characters`);
   }
   if (typeof item.title !== 'string' || !item.title.trim()) problems.push('title is required');
+  if (typeof item.workspace === 'string' && !item.workspace.trim()) problems.push('workspace must name a board (leave it out for Inbox)');
   if (typeof item.source !== 'string' || !SOURCE_NAME.test(item.source)) {
     problems.push('source is required: lowercase letters, digits, . _ - (who sent it, e.g. "ci")');
   }
@@ -796,11 +797,11 @@ function itemProblems(item) {
   return problems;
 }
 
+// The board an item names, made with the work columns if it is not there yet.
 function itemWorkspace(name) {
-  const wanted = (name || 'Inbox').trim();
-  let ws = state.workspaces.find((w) => w.name === wanted);
+  let ws = state.workspaces.find((w) => w.name === name);
   if (!ws) {
-    ws = { ...starterWorkspace(wanted), binders: makeBinders(ITEM_BINDERS) };
+    ws = { ...starterWorkspace(name), binders: makeBinders(ITEM_BINDERS) };
     state.workspaces.push(ws);
   }
   return ws;
@@ -833,11 +834,14 @@ app.post('/api/items', (req, res) => {
       return res.json({ cardId: card.id, workspaceId: ws.id, created: false, joined: true });
     }
   }
-  const ws = itemWorkspace(item.workspace);
-  const binder = (item.column && ws.binders.find((b) => b.title === item.column.trim())) || ws.binders[0] || null;
-  if (item.column && binder?.title !== item.column.trim()) {
-    return res.status(400).json({ error: `no column "${item.column}" on ${ws.name}`, columns: ws.binders.map((b) => b.title) });
+  const wanted = (item.workspace || 'Inbox').trim();
+  const existing = state.workspaces.find((w) => w.name === wanted);
+  const columns = existing ? existing.binders.map((b) => b.title) : ITEM_BINDERS;   // checked before a new board is made
+  if (item.column && !columns.includes(item.column.trim())) {
+    return res.status(400).json({ error: `no column "${item.column}" on ${wanted}`, columns });
   }
+  const ws = existing || itemWorkspace(wanted);
+  const binder = (item.column && ws.binders.find((b) => b.title === item.column.trim())) || ws.binders[0] || null;
   const card = {
     id: randomUUID(),
     title: item.title.trim(),

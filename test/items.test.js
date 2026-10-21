@@ -76,6 +76,17 @@ test('an item names its board and column, and an unknown column is refused with 
   assert.deepEqual(nowhere.body.columns, ['New', 'Working', 'Needs you', 'Review', 'Done', "Won't do"]);
 });
 
+test('an item refused for its column leaves no new board behind, and a board needs a name', async () => {
+  const refused = await send(open, { source: 'ci', title: 'x', workspace: 'Never made', column: 'Someday' });
+  assert.equal(refused.status, 400);
+  assert.deepEqual(refused.body.columns, ['New', 'Working', 'Needs you', 'Review', 'Done', "Won't do"]);
+  const boards = await (await fetch(`${open.url}/api/state`)).json();
+  assert.ok(!boards.workspaces.some((w) => w.name === 'Never made'));
+  const blank = await send(open, { source: 'ci', title: 'x', workspace: '   ' });
+  assert.equal(blank.status, 400);
+  assert.deepEqual(blank.body.problems, ['workspace must name a board (leave it out for Inbox)']);
+});
+
 test('what is not an item is refused, saying why', async () => {
   const { status, body } = await send(open, { title: ' ', source: 'Not A Name', link: { url: 'javascript:alert(1)' } });
   assert.equal(status, 400);
