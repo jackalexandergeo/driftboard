@@ -431,17 +431,48 @@ app.post('/api/session', express.json({ limit: '4kb' }), (req, res) => {
 // A PIN set with `npm run set-pin` signs a tab in from the locked page, so a new tab or a
 // bookmark needs no terminal. Only its scrypt hash is kept (data/pin, 0600). Guessing is slowed
 // for everyone (one try at a time, and a wait after each wrong one that doubles), and stops
-// after PIN_MAX_FAILURES wrong ones until the PIN is set again.
+// after PIN_MAX_FAILURES wrong ones until the PIN is set again. The wrong tries and the wait are
+// kept next to it (pin-tries), so a restart does not hand out fresh tries.
 const PIN_MAX_FAILURES = 20;
+const PIN_TRIES_FILE = `${PIN_FILE}-tries`;
 const pin = { failures: 0, waitUntil: 0, checking: false, salt: null };
+let pinComplaint = null;
+function complainOnce(text) {
+  if (pinComplaint !== text) console.warn(text);
+  pinComplaint = text;
+}
+// The PIN as set-pin writes it, or null: none, or a file that is not one (then no PIN, logged).
 function readPin() {
+  let saved;
   try {
-    const saved = JSON.parse(fs.readFileSync(PIN_FILE, 'utf8'));
-    if (saved.version !== 1) return null;
-    if (saved.salt !== pin.salt) Object.assign(pin, { failures: 0, waitUntil: 0, salt: saved.salt }); // set again
-    return saved;
-  } catch {
+    saved = JSON.parse(fs.readFileSync(PIN_FILE, 'utf8'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') complainOnce(`${PIN_FILE} cannot be read (${error.message}): no PIN until it is set again`);
     return null;
+  }
+  const N = saved?.N;
+  if (saved?.version !== 1 || !/^[0-9a-f]{32}$/.test(saved.salt) || !/^[0-9a-f]{128}$/.test(saved.hash)
+      || !Number.isInteger(N) || N < 2 ** 14 || N > 2 ** 20 || (N & (N - 1)) !== 0) {
+    complainOnce(`${PIN_FILE} is not a PIN \`npm run set-pin\` wrote: no PIN until it is set again`);
+    return null;
+  }
+  if (saved.salt !== pin.salt) loadPinTries(saved.salt); // the first look since the start, or set again
+  return saved;
+}
+function loadPinTries(salt) {
+  let tries = null;
+  try { tries = JSON.parse(fs.readFileSync(PIN_TRIES_FILE, 'utf8')); } catch { /* none yet */ }
+  const same = tries?.salt === salt;   // tries for an earlier PIN do not count against this one
+  Object.assign(pin, { salt, failures: same && Number.isInteger(tries.failures) ? tries.failures : 0,
+    waitUntil: same && Number.isFinite(tries.waitUntil) ? tries.waitUntil : 0 });
+}
+function savePinTries() {
+  try {
+    fs.writeFileSync(`${PIN_TRIES_FILE}.tmp`, JSON.stringify({ salt: pin.salt, failures: pin.failures, waitUntil: pin.waitUntil }),
+      { mode: 0o600 });
+    fs.renameSync(`${PIN_TRIES_FILE}.tmp`, PIN_TRIES_FILE);
+  } catch (error) {
+    console.error(`could not keep the wrong PIN tries in ${PIN_TRIES_FILE}: ${error.message}`);
   }
 }
 // Whether this board asks for a sign-in at all (DRIFTBOARD_SIGN_IN=off says no).
@@ -462,17 +493,24 @@ app.post('/api/pin', express.json({ limit: '1kb' }), (req, res) => {
     return res.status(429).json({ error: 'wait a moment before trying again', retryAfterMs: Math.max(0, pin.waitUntil - now) });
   }
   pin.checking = true;
-  scrypt(String(req.body?.pin ?? ''), Buffer.from(saved.salt, 'hex'), 64, { N: saved.N, r: 8, p: 1, maxmem: 128 * 1024 * 1024 },
-    (err, hash) => {
-      pin.checking = false;
-      if (err || !timingSafeEqual(hash, Buffer.from(saved.hash, 'hex'))) {
-        pin.failures += 1;
-        pin.waitUntil = Date.now() + Math.min(1000 * 2 ** (pin.failures - 1), 10 * 60 * 1000);
-        return res.status(401).json({ error: 'wrong PIN', triesLeft: PIN_MAX_FAILURES - pin.failures });
-      }
-      Object.assign(pin, { failures: 0, waitUntil: 0 });
-      res.json({ token: TOKEN });
-    });
+  try {
+    scrypt(String(req.body?.pin ?? ''), Buffer.from(saved.salt, 'hex'), 64, { N: saved.N, r: 8, p: 1, maxmem: 128 * 1024 * 1024 },
+      (err, hash) => {
+        pin.checking = false;
+        if (err || !timingSafeEqual(hash, Buffer.from(saved.hash, 'hex'))) {
+          pin.failures += 1;
+          pin.waitUntil = Date.now() + Math.min(1000 * 2 ** (pin.failures - 1), 10 * 60 * 1000);
+          savePinTries();
+          return res.status(401).json({ error: 'wrong PIN', triesLeft: PIN_MAX_FAILURES - pin.failures });
+        }
+        Object.assign(pin, { failures: 0, waitUntil: 0 });
+        savePinTries();
+        res.json({ token: TOKEN });
+      });
+  } catch (error) {   // it could not even start: not a wrong try, and the next one is not kept waiting
+    pin.checking = false;
+    res.status(500).json({ error: `the PIN could not be checked: ${error.message}` });
+  }
 });
 
 // ---- Agents: each holds a token that reaches its own card only ----
