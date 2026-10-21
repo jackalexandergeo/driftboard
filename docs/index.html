@@ -57,12 +57,12 @@
     <div class="locked hidden" id="locked" role="alert">
       <h2>This board is locked</h2>
       <p>Open it again from a terminal on the machine it runs on with <code>npm run open</code>
-        (with the same <code>DRIFTBOARD_DATA</code> and <code>PORT</code> as the server), or
+        (with the same <code>DRIFTBOARD_DATA</code>, <code>PORT</code> and <code>DRIFTBOARD_HOST</code> as the server), or
         from the app that opened it. Once signed in, this browser stays signed in for this
         address (127.0.0.1 and localhost count as two).</p>
       <form id="pin-form" class="pin-form hidden" autocomplete="off">
         <label for="pin-input">Or sign in with your PIN</label>
-        <input id="pin-input" type="password" inputmode="numeric" maxlength="32" autocomplete="off" />
+        <input id="pin-input" type="password" maxlength="32" autocomplete="off" />
         <button type="submit">Sign in</button>
         <p class="pin-error" id="pin-error" role="status"></p>
       </form>
