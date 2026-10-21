@@ -22,7 +22,7 @@ from .config import configProblems, loadConfig, stateDirectory
 from .guard import writeGuards
 from .outbox import append
 from .relay import Relay
-from .rules import claudePermissions, guidanceFor, rulesFor, unguarded
+from .rules import claudePermissions, guidanceFor, limitsOf, rulesFor, unguarded
 
 logger = logging.getLogger("driftboard_helper")
 
@@ -253,7 +253,8 @@ class Helper:
 
     def _writeSettings(self, folder, outbox):
         agent = self.config["agent"]
-        guards = writeGuards(os.path.join(folder, "guards"), unguarded(agent.get("access"), agent.get("limits")))
+        guards = writeGuards(os.path.join(folder, "guards"), unguarded(agent.get("access"), agent.get("limits")),
+                             {"gitHosts": agent.get("gitHosts") or [], "push": limitsOf(agent.get("limits"))["push"] != "never"})
         environmentFile = os.path.join(folder, "session-env.sh")
         with open(environmentFile, "w") as script:
             script.write('export PATH=%s:%s:"$PATH"\n' % (shlex.quote(guards), shlex.quote(AGENT_BIN)))

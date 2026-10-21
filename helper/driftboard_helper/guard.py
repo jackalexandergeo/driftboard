@@ -5,7 +5,8 @@ past them, so they are a floor, not a wall.
 
     glab, gh   only commands known to read (an alias or a new subcommand is refused, not let through)
     git        never pushes (no push, send-pack, pushing alias, new remote, -c alias.* / url.*)
-    ssh        only as git's own transport, fetching from the hosts the user named (DRIFTBOARD_GIT_HOSTS)
+    ssh        only as git's own transport to the hosts the user named (gitHosts): fetching, and
+               pushing too when their push limit is not never
     scp, sftp  never
 
 A command the user opened in [agent.access] gets no stand-in.
@@ -53,13 +54,14 @@ def positional(arguments, withValue=()):
     return found
 
 
-def verdict(command, arguments, gitHosts=(), aliasOf=None):
-    """None when the command may run, else why not."""
+def verdict(command, arguments, gitHosts=(), aliasOf=None, pushOpen=False):
+    """None when the command may run, else why not. pushOpen: the user's push limit is not never,
+    so git may push over ssh to those hosts too."""
     if command in ("scp", "sftp"):
         return "%s is not for agents: ask the user if the card needs another machine" % command
     if command == "ssh":
-        return None if gitFetch(arguments, gitHosts) else "ssh is not for agents, except git fetching from %s" % (
-            ", ".join(gitHosts) or "no host (none named)")
+        return None if gitTransport(arguments, gitHosts, pushOpen) else "ssh is not for agents, except git's own %s %s" % (
+            "fetch from and push to" if pushOpen else "fetch from", ", ".join(gitHosts) or "no host (none named)")
     if command in ("glab", "gh"):
         return forgeVerdict(command, arguments)
     if command == "git":
@@ -137,8 +139,9 @@ def gitVerdict(arguments, aliasOf=None):
     return None
 
 
-def gitFetch(arguments, gitHosts):
-    """True when ssh is git fetching from one of the named hosts, as git runs it."""
+def gitTransport(arguments, gitHosts, pushOpen=False):
+    """True when ssh is git fetching from (or, with pushOpen, pushing to) one of the named hosts,
+    as git runs it."""
     index = 0
     while index < len(arguments) and arguments[index].startswith("-"):
         option = arguments[index]
@@ -152,8 +155,9 @@ def gitFetch(arguments, gitHosts):
         else:
             return False
     rest = arguments[index:]
+    service = rest[1].split(" ", 1)[0] if len(rest) == 2 else None
     return (len(rest) == 2 and rest[0].rpartition("@")[2] in gitHosts
-            and rest[1].split(" ", 1)[0] in GIT_FETCHES)
+            and (service in GIT_FETCHES or (pushOpen and service == "git-receive-pack")))
 
 
 def realCommand(command, guardDirectory):
@@ -175,10 +179,15 @@ def gitAlias(name, guardDirectory):
     return found.stdout.strip() or None
 
 
-def writeGuards(directory, opened=()):
-    """The stand-ins in directory (put it first on PATH); none for a command the user opened."""
+def writeGuards(directory, opened=(), pinned=None):
+    """The stand-ins in directory (put it first on PATH); none for a command the user opened.
+    pinned: {gitHosts, push}, written into the stand-ins themselves, where the agent's environment
+    cannot change them; without it the hosts come from the environment and git never pushes."""
     os.makedirs(directory, mode=0o700, exist_ok=True)
     package = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    settings = "DRIFTBOARD_GUARD_PUSH=%s " % ("1" if (pinned or {}).get("push") else "0")
+    if pinned is not None:
+        settings += "DRIFTBOARD_GIT_HOSTS=%s " % shlex.quote(",".join(pinned.get("gitHosts") or []))
     for command in COMMANDS:
         path = os.path.join(directory, command)
         if command in opened:
@@ -187,9 +196,9 @@ def writeGuards(directory, opened=()):
             continue
         with open(path, "w") as script:
             # -P: the agent's working folder must not get to stand in for this module
-            script.write("#!/bin/sh\nDRIFTBOARD_GUARD_DIR=%s PYTHONPATH=%s exec %s -P -m driftboard_helper.guard %s \"$@\"\n"
-                         % tuple(shlex.quote(part) for part in (os.path.abspath(directory), package, sys.executable,
-                                                                command)))
+            script.write("#!/bin/sh\n%sDRIFTBOARD_GUARD_DIR=%s PYTHONPATH=%s exec %s -P -m driftboard_helper.guard %s \"$@\"\n"
+                         % ((settings,) + tuple(shlex.quote(part) for part in (os.path.abspath(directory), package,
+                                                                               sys.executable, command))))
         os.chmod(path, 0o755)
     return directory
 
@@ -198,7 +207,8 @@ def main(arguments):
     command, rest = arguments[0], arguments[1:]
     guardDirectory = os.environ["DRIFTBOARD_GUARD_DIR"]
     gitHosts = [host for host in os.environ.get("DRIFTBOARD_GIT_HOSTS", "").split(",") if host]
-    reason = verdict(command, rest, gitHosts, aliasOf=lambda name: gitAlias(name, guardDirectory))
+    reason = verdict(command, rest, gitHosts, aliasOf=lambda name: gitAlias(name, guardDirectory),
+                     pushOpen=os.environ.get("DRIFTBOARD_GUARD_PUSH") == "1")
     if reason:
         print("driftboard guard: refused %s: %s. If the card needs it, ask the user (driftboard-agent ask)."
               % (command, reason), file=sys.stderr)
