@@ -19,6 +19,10 @@
 
     [agent.limits]                  # what agents hold back unless you ask: chat, codeHost, push, http,
     chat = "never"                  # credentials; each "never", "ask" (default; credentials never) or "allow"
+
+    [agent.budget]                  # shares of the 5-hour Claude limit, in percent; 0 (default) is no budget
+    cardPercent = 0                 # one card's agent: past it the agent stops; Resume or a reply allows it as much again
+    totalPercent = 0                # all the board's agents together: past it they stop, and none starts until the reset
 """
 
 import copy
@@ -28,10 +32,11 @@ import tomllib
 from .rules import ACCESS_LEVELS, COMMAND_NAME, DEFAULT_LIMITS, LIMIT_LEVELS
 
 TOOLS = ("claude", "codex")
+BUDGETS = ("cardPercent", "totalPercent")
 DEFAULTS = {
     "board": {"url": "http://127.0.0.1:4321", "tokenFile": "~/.local/share/driftboard/token", "workspaces": ["Inbox"]},
     "agent": {"tool": "claude", "directory": "", "model": "", "maxAgents": 1, "gitHosts": [], "rules": [],
-              "denyCommands": [], "access": {}, "limits": {}},
+              "denyCommands": [], "access": {}, "limits": {}, "budget": {}},
     # app: the terminal ↗ Terminal opens ("terminator", or ["kitty", "--hold", "{command}"]); empty: the
     # system's default. board: the terminal in the board page (Linux and macOS).
     "terminal": {"app": "", "board": True},
@@ -70,6 +75,14 @@ def loadConfig(path=None):
         else:
             config[key] = value
     return config
+
+
+def budgetOf(config):
+    """{cardPercent, totalPercent}: 0 for each one not set, or not a number."""
+    budget = config["agent"].get("budget")
+    budget = budget if isinstance(budget, dict) else {}
+    return {kind: budget[kind] if isinstance(budget.get(kind), (int, float)) and not isinstance(budget.get(kind), bool)
+            else 0 for kind in BUDGETS}
 
 
 def configProblems(config):
@@ -116,6 +129,17 @@ def configProblems(config):
             problems.append('terminal.app is an app\'s name ("terminator") or a command with "{command}" in it')
         if not isinstance(terminal.get("board", True), bool):
             problems.append("terminal.board must be true or false")
+    budget = agent.get("budget")
+    if not isinstance(budget, dict):
+        problems.append("agent.budget must be a table")
+    else:
+        for kind, percent in budget.items():
+            if kind not in BUDGETS or not isinstance(percent, (int, float)) or isinstance(percent, bool) \
+                    or not 0 <= percent <= 100:
+                problems.append("agent.budget: %s = %r: kinds are %s; each a percent from 0 (no budget) to 100"
+                                % (kind, percent, ", ".join(BUDGETS)))
+        if any(budgetOf(config).values()) and agent.get("tool") != "claude":
+            problems.append("agent.budget needs Claude Code: it reads Claude's usage and transcripts")
     if not isinstance(board.get("workspaces"), list) or not board["workspaces"]:
         problems.append("board.workspaces must name at least one board")
     interval = config.get("intervalSeconds")

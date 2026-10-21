@@ -6,7 +6,8 @@ import shutil
 import subprocess
 
 from .board import BoardClient, BoardError
-from .config import TOOLS, configProblems
+from .config import TOOLS, budgetOf, configProblems
+from .usage import fetchUsage
 
 # The board's own names for the three columns an agent moves its card among (server.js).
 AGENT_COLUMNS = {"Working": ("Working", "Researching", "In progress", "In Progress", "Doing"),
@@ -65,15 +66,27 @@ def boardChecks(config, client):
     return results
 
 
-def checks(config, run=runTool, which=shutil.which, client=None):
+def checks(config, run=runTool, which=shutil.which, client=None, fetch=None):
     """[(ok, what was checked, how to fix it)]: everything, even after a problem, so one run shows all."""
     problems = configProblems(config)
     results = [(not problems, "the config", "; ".join(problems))]
     tool = config["agent"].get("tool")
     if tool in TOOLS:
         results += toolChecks(tool, run, which)
+    if tool == "claude" and any(budgetOf(config).values()):
+        results += usageChecks(fetch or fetchUsage)
     client = client or BoardClient(config["board"]["url"], config["board"]["tokenFile"])
     return results + boardChecks(config, client)
+
+
+def usageChecks(fetch):
+    try:
+        utilization = ((fetch() or {}).get("five_hour") or {}).get("utilization")
+    except (OSError, ValueError) as error:
+        fix = ("the endpoint is busy (the top bar and other tools ask it too): the helper asks again later"
+               if "429" in str(error) else "sign in to Claude Code again by running `claude`")
+        return [(False, "Claude usage is readable (for agent.budget)", "%s: %s; until then no budget is kept" % (error, fix))]
+    return [(True, "Claude usage is readable (%s%% of the 5-hour limit used)" % utilization, "")]
 
 
 def report(results):
