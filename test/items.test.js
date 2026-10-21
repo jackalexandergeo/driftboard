@@ -11,7 +11,7 @@ before(async () => {
   [open, locked] = await Promise.all([startBoard(false), startBoard(true)]);
 });
 
-after(() => [open, locked].forEach(stopBoard));
+after(() => Promise.all([open, locked].map(stopBoard)));
 
 async function send(board, item, token) {
   const response = await fetch(`${board.url}/api/items`, {

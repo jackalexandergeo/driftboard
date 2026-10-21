@@ -37,8 +37,13 @@ export async function startBoard(signIn) {
   return { server, data, url, token };
 }
 
-export function stopBoard(board) {
-  board.server.kill();
+// The board writes its file after each answer: its folder goes only once it has exited.
+export async function stopBoard(board) {
+  if (board.server.exitCode === null && board.server.signalCode === null) {
+    const exited = new Promise((resolve) => board.server.once('exit', resolve));
+    board.server.kill();
+    await exited;
+  }
   fs.rmSync(board.data, { recursive: true, force: true });
 }
 
