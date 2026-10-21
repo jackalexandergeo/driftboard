@@ -67,6 +67,19 @@ test('a long result in any script arrives whole, however the client encodes it',
   assert.equal((await cardOf(cardId)).agent.result, 'あ'.repeat(20000));
 });
 
+test('an agent reads its own card, with what the user said to it, and no other', async () => {
+  const { cardId } = await newCard('Read me');
+  const other = await newCard('Not yours');
+  const token = await agentFor(cardId);
+  await call(board, 'POST', `/api/cards/${cardId}/chat`, { text: 'Use the 2026 ledger.' }, board.token);
+  const { status, body } = await call(board, 'GET', `/api/agent/cards/${cardId}`, undefined, token);
+  assert.equal(status, 200);
+  assert.deepEqual([body.card.title, body.card.column, body.card.chat.map((message) => message.text)], ['Read me', 'New', ['Use the 2026 ledger.']]);
+  assert.equal(body.card.agent.tokenHash, undefined);
+  assert.equal((await call(board, 'GET', `/api/agent/cards/${other.cardId}`, undefined, token)).status, 401);
+  assert.equal((await call(board, 'GET', `/api/agent/cards/${cardId}`, undefined, board.token)).status, 401);
+});
+
 test('asking moves the card to Needs you; going back to work clears the question', async () => {
   const { cardId, workspaceId } = await newCard('Which ledger?');
   const token = await agentFor(cardId);

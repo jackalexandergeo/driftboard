@@ -532,6 +532,14 @@ const agentApi = express.Router();
 // Room for the longest text (20000 characters) however it is sent: UTF-8 takes up to 4 bytes a
 // character, and an escaped \uXXXX 6.
 agentApi.use(express.json({ limit: '256kb' }));
+// What the agent needs to read: its card, the user's side of the chat with it, and the column.
+agentApi.get('/cards/:id', (req, res) => {
+  const found = agentCard(req, res); if (!found) return;
+  const { ws, card } = found;
+  const { tokenHash, ...agent } = card.agent;
+  res.json({ card: { id: card.id, title: card.title, description: card.description, column: columnOf(ws, card),
+    chat: card.chat || [], agent } });
+});
 agentApi.patch('/cards/:id', (req, res) => {   // {progress?, result?}
   const found = agentCard(req, res); if (!found) return;
   const { card } = found;
