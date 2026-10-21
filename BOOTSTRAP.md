@@ -18,6 +18,12 @@ user and wait. Every value in their config comes from their answers or their own
 
 - **Show every config before you write it**, and write it only once they say yes. If a file is
   there already, show the difference and back the old one up first.
+- **The user runs the installers, not you.** They install services that start agents, and
+  Claude Code's auto mode refuses them for that (it reads `install-service` as setting up an
+  agent runner). So do the checks and write the configs yourself, then hand them each install or
+  start command as a `! <command>` line to type in the prompt (Claude Code runs it in this
+  session; elsewhere they run it in a terminal), wait, and check the result yourself. Steps 4
+  and 5 mark these lines with `!`.
 - **Do not start an agent yourself.** The user presses ▶ Start, in step 6. An agent spends their
   AI plan.
 - **Never print the board's token or items key**, and never put either on a command line
@@ -76,13 +82,15 @@ Ask one question at a time, offering the default:
 
 ## 4. Install the board
 
-    ~/driftboard/install-service            # add --no-sign-in if that was their answer to question 1
+The user types these (see the rules):
+
+    ! ~/driftboard/install-service          # add --no-sign-in if that was their answer to question 1
 
 It checks Node, Python and the tools, installs `driftboard.service` and
 `driftboard-helper.service` as systemd user units (keeping any unit it did not write), writes
 a starter helper config, and prints what to run next. Then:
 
-    systemctl --user enable --now driftboard
+    ! systemctl --user enable --now driftboard
     systemctl --user is-active driftboard     # active
     npm --prefix ~/driftboard run open        # opens the board, signed in (with sign-in on)
 
@@ -117,10 +125,10 @@ rules = []                          # question 4
 app = ""                            # question 9
 ```
 
-Then check it, and start the helper:
+Then check it, and have the user start the helper:
 
     ~/driftboard/helper/bin/driftboard-helper check
-    systemctl --user enable --now driftboard-helper
+    ! systemctl --user enable --now driftboard-helper     # the user types this
 
 `check` says what is in the way and how to fix it. Until step 6 it says the Inbox is missing:
 the Inbox appears with the first card.
@@ -166,6 +174,7 @@ thread=..., link=...)` for each thing worth a card, from a loop or a cron job. T
 
 | Symptom | Look at |
 |---|---|
+| an install is refused (auto mode) | expected: the user runs it as a `! <command>` line (see the rules) |
 | `check` names a problem | it says the fix: install or sign in to the tool, start the board, add the Inbox (step 6) |
 | the board asks to sign in | open it with `npm --prefix ~/driftboard run open`, not by typing the address |
 | ▶ Start does nothing | the helper is not running: `systemctl --user status driftboard-helper`; after a minute the button says so |
