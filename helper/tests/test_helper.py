@@ -431,6 +431,20 @@ class HelperTest(unittest.TestCase):
         self.assertIn("session failed", " ".join(self.notes(cardId)))
         self.assertEqual(self.buttons(cardId), [RESUME["id"], REPLY["id"], CONTEXT["id"]])
 
+    def testADeletedCardsAgentIsStoppedAndItsSlotFreed(self):
+        cardId, waiting = self.item("Deleted"), self.item("Only context")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.press(waiting, "context", "Some context.")
+        self.helper.passOnce()
+        self.board.call("DELETE", "/api/cards/%s" % cardId)
+        self.board.call("DELETE", "/api/cards/%s" % waiting)
+        self.helper.passOnce()
+        self.assertEqual(self.helper.state["runs"][cardId]["state"], "closed")
+        self.assertNotIn(waiting, self.helper.state["runs"])
+        self.assertTrue(any(call[1] == "stop" for call in self.claude.calls))
+        self.assertEqual(self.helper._running(), 0)
+
     def testACardAlreadyClosedOffersNoAgent(self):
         # Live: cards posted straight into Won't do got ▶ Start.
         cardId = self.board.call("POST", "/api/items", {"source": "test", "title": "Out of scope", "column": "Won't do"})["cardId"]

@@ -111,13 +111,14 @@ class Helper:
         match what the pass found."""
         listed = self.board.request("GET", "/api/state")
         wanted = set(self.config["board"]["workspaces"])
-        cards = []
+        cards, onBoards = [], set()
         for summary in listed.get("workspaces") or []:
             if summary.get("name") not in wanted:
                 continue
             workspace = self.board.request("GET", "/api/workspaces/%s" % summary["id"])
             columns = {binder["id"]: binder["title"] for binder in workspace.get("binders") or []}
             for card in workspace.get("cards") or []:
+                onBoards.add(card.get("id"))
                 column = columns.get(card.get("binderId"))
                 if not ours(card):
                     continue
@@ -128,6 +129,7 @@ class Helper:
                     logger.warning("card %s: %s", card.get("id"), error)
                 except Exception:   # one card's surprise must not stop the others
                     logger.exception("card %s: unexpected error", card.get("id"))
+        self._gone(onBoards)
         self._watch()
         for card, column in cards:
             wantedButtons = buttonsFor(self.state["runs"].get(card["id"]), column)
@@ -139,6 +141,25 @@ class Helper:
                 except BoardError as error:
                     logger.warning("card %s: %s", card["id"], error)
         self._save()
+
+    def _gone(self, onBoards):
+        """Runs whose card was deleted, or is no longer on a watched board: the agent stops, its
+        token goes, and a run that never started is forgotten."""
+        for cardId, run in list(self.state["runs"].items()):
+            if cardId in onBoards or run.get("state") == "closed":
+                continue
+            try:
+                self.board.request("GET", "/api/cards/%s" % cardId)
+                where = "is no longer on a board the helper watches"
+            except BoardError as error:
+                if error.status != 404:
+                    continue   # the board could not say: ask again next pass
+                where = "was deleted"
+            if run.get("state") == "waiting":
+                del self.state["runs"][cardId]
+                continue
+            logger.info("card %s %s: closing its run", cardId, where)
+            self._close(cardId, run)
 
     def _card(self, card, column):
         runs = self.state["runs"]
