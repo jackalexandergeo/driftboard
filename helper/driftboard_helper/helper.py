@@ -11,6 +11,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import shlex
 import sys
 import time
@@ -29,6 +30,10 @@ HELPER_DIRECTORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BRIEF = os.path.join(HELPER_DIRECTORY, "agents", "brief.md")
 AGENT_BIN = os.path.join(HELPER_DIRECTORY, "bin")
 CLOSED_COLUMNS = ("Done", "Won't do")
+CHAT_PICTURES = 8   # as many as the board takes on one message
+PICTURE_BYTES = 20 * 1024 * 1024
+PICTURE_EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
+UPLOAD_NAME = re.compile(r"[0-9a-f-]{36}(\.[a-z0-9]{1,10})?")   # how the board names an upload
 
 START = {"id": "start", "label": "▶ Start", "title": "Start an agent on this card"}
 STOP = {"id": "stop", "label": "⏹ Stop", "title": "Stop the agent; ▶ Resume carries on"}
@@ -163,16 +168,54 @@ class Helper:
         return run.setdefault("seenChat", [])
 
     def _chat(self, card):
-        """What the user wrote in the card's chat since the last pass goes to the agent, once."""
+        """What the user wrote in the card's chat since the last pass goes to the agent, once,
+        with the pictures they put in it saved where the agent can open them."""
         seen = set(self._seen(card["id"])) if card["id"] in self.state["runs"] else set()
         for message in card.get("chat") or []:
             if message.get("from") != "user" or message.get("id") in seen:
                 continue
-            self._deliver(card["id"], message.get("text") or "", "The user says")
+            text = message.get("text") or ""
+            pictures = self._pictures(card["id"], message)
+            if pictures:
+                text = "%s\n\n%s" % (text, pictures) if text else pictures
+            self._deliver(card["id"], text, "The user says")
             self._seen(card["id"]).append(message["id"])
         run = self.state["runs"].get(card["id"])
         if run and len(run.get("seenChat") or []) > 1000:
             run["seenChat"] = run["seenChat"][-1000:]
+
+    def _pictures(self, cardId, message):
+        """Save a message's pictures in the card's run folder; what to tell the agent about them."""
+        images = [image for image in message.get("images") or [] if isinstance(image, dict)][:CHAT_PICTURES]
+        if not images:
+            return ""
+        folder = os.path.join(self.directory, "runs", cardId, "pictures")
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        saved, missing = [], 0
+        for number, image in enumerate(images, start=1):
+            extension = PICTURE_EXTENSIONS.get(image.get("mimeType"))
+            filename = image.get("filename")
+            if not extension or not isinstance(filename, str) or not UPLOAD_NAME.fullmatch(filename):
+                missing += 1
+                continue
+            try:
+                data = self.board.download(filename, PICTURE_BYTES)
+            except BoardError as error:
+                logger.warning("card %s: could not fetch a chat picture: %s", cardId, error)
+                missing += 1
+                continue
+            path = os.path.join(folder, "%s-%d%s" % (message["id"], number, extension))
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(descriptor, "wb") as pictureFile:
+                pictureFile.write(data)
+            saved.append(path)
+        lines = ["The user put %s in the chat; open %s to see %s:" % (
+            "a picture" if len(saved) == 1 else "%d pictures" % len(saved), "it" if len(saved) == 1 else "each",
+            "it" if len(saved) == 1 else "them")] + ["- %s" % path for path in saved] if saved else []
+        if missing:
+            lines.append("(%d more could not be fetched from the board: ask the user for %s if you need %s.)"
+                         % (missing, "it" if missing == 1 else "them", "it" if missing == 1 else "them"))
+        return "\n".join(lines)
 
     def _deliver(self, cardId, text, label):
         """Before the agent starts: context for its first prompt. After: to the agent, now or when its turn ends."""

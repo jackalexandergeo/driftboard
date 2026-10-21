@@ -45,6 +45,20 @@ class Board:
         with self._opener.open(request, timeout=10) as response:
             return json.loads(response.read() or b"null")
 
+    def upload(self, cardId, name, mimeType, data):
+        """A file attached to the card, as the board's page uploads one."""
+        boundary = "driftboard-test-boundary"
+        body = b"".join([("--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\n"
+                          "Content-Type: %s\r\n\r\n" % (boundary, name, mimeType)).encode(), data,
+                         ("\r\n--%s--\r\n" % boundary).encode()])
+        with open(self.tokenFile) as tokenFile:
+            token = tokenFile.read().strip()
+        request = urllib.request.Request(self.url + "/api/cards/%s/attachments" % cardId, data=body, method="POST",
+                                         headers={"Authorization": "Bearer " + token,
+                                                  "Content-Type": "multipart/form-data; boundary=" + boundary})
+        with self._opener.open(request, timeout=10) as response:
+            return json.loads(response.read())
+
     def column(self, cardId):
         found = self.call("GET", "/api/cards/%s" % cardId)
         workspace = self.call("GET", "/api/workspaces/%s" % found["workspaceId"])

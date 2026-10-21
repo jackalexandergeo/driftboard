@@ -178,6 +178,27 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(chat, [("user", "Use the 2026 ledger."), ("agent", "Starting on the ledger."),
                                 ("user", "How many mismatches?"), ("agent", "Done: 2 mismatches.")])
 
+    def testAPictureInTheChatReachesTheAgentAsAFileItCanOpen(self):
+        # The user: "I pasted an image in, but there was no option to send it does the agent see the image?"
+        cardId = self.item("Look at this")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        self.now += 31
+        self.helper.passOnce()
+        picture = b"\x89PNG\r\n\x1a\n a screenshot"
+        attachment = self.board.upload(cardId, "screenshot.png", "image/png", picture)
+        self.board.call("POST", "/api/cards/%s/chat" % cardId, {"text": "", "images": [attachment["id"]]})
+        self.settle()
+        session = next(iter(self.claude.sessions.values()))
+        message, = session["messages"]
+        self.assertTrue(message.startswith("The user says: The user put a picture in the chat; open it to see it:\n- "), message)
+        path = message.split("\n- ")[1]
+        self.assertTrue(path.startswith(os.path.join(session["env"]["DRIFTBOARD_RUN"], "pictures", "")), path)
+        with open(path, "rb") as pictureFile:
+            self.assertEqual(pictureFile.read(), picture)
+
     def testAChatMessageReachesAnAgentBlockedOnItsQuestion(self):
         # Live: the agent ended its turn on a question, `claude agents` listed it as blocked, and the
         # user's chat message waited for a turn end that, by the helper's count, never came.

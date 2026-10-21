@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -43,6 +44,23 @@ class BoardClient:
         wanted = hmac.new(token.encode(), ("driftboard-hello:" + nonce).encode(), hashlib.sha256).hexdigest()
         if not isinstance(proof, str) or not hmac.compare_digest(proof, wanted):
             raise BoardError("the server at %s could not prove it is the board; no token was sent" % self.url)
+
+    def download(self, filename, limit):
+        """An uploaded file's bytes, with the board's token (at most limit bytes)."""
+        token = self.token()
+        self._proven(token)
+        request = urllib.request.Request("%s/uploads/%s" % (self.url, urllib.parse.quote(filename)))
+        request.add_header("Authorization", "Bearer %s" % token)
+        try:
+            with self._opener.open(request, timeout=self.timeout) as response:
+                data = response.read(limit + 1)
+        except urllib.error.HTTPError as error:
+            raise BoardError("GET /uploads/%s: HTTP %d" % (filename, error.code), error.code)
+        except OSError as error:
+            raise BoardError("GET /uploads/%s: %s" % (filename, error))
+        if len(data) > limit:
+            raise BoardError("%s is larger than %d bytes" % (filename, limit))
+        return data
 
     def request(self, method, path, body=None, cardToken=None):
         """A call with the board's token, or, for an agent call, with a card's own token."""
