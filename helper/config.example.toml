@@ -1,17 +1,23 @@
 # driftboard-helper: copy to ~/.config/driftboard-helper/config.toml (install-service does) and
-# set agent.directory. `bin/driftboard-helper check` says what is wrong, if anything.
+# set agent.directory. `helper/bin/driftboard-helper check` says what is wrong, if anything.
+
+intervalSeconds = 3            # how often the helper looks at the board (top level: keep it above [board])
 
 [board]
 url = "http://127.0.0.1:4321"
-tokenFile = "~/.local/share/driftboard/token"   # the board's DRIFTBOARD_DATA folder
-workspaces = ["Inbox"]                          # boards whose cards get the agent buttons
+tokenFile = "~/.local/share/driftboard/token"   # the board's data folder (DRIFTBOARD_DATA)
+workspaces = ["Inbox"]         # boards whose cards get the agent buttons. The Inbox appears with the
+                               # first item (pinger/driftboard-ping "hello"). Each board needs a Working
+                               # (or In progress), a Needs you and a Review column for the agents.
 
 [agent]
 tool = "claude"                # or "codex"
 directory = ""                 # the project folder agents start in (not the home folder)
 model = ""                     # empty: the tool's own default
-maxAgents = 3                  # more starts wait their turn
-gitHosts = []                  # hosts git may fetch from over ssh, e.g. ["github.com"]
+maxAgents = 1                  # agents at work at once; more starts wait their turn. Every agent works in
+                               # agent.directory, so raise it only for cards that do not edit files there.
+gitHosts = []                  # hosts git may reach over ssh, e.g. ["github.com"]: fetching always,
+                               # pushing as agent.limits.push says
 rules = []                     # your own hard rules, e.g. ["Never touch the production ledger."]
 denyCommands = []              # extra Claude Code deny rules, e.g. ["Bash(chat-cli *send*)"]
 
@@ -20,4 +26,5 @@ denyCommands = []              # extra Claude Code deny rules, e.g. ["Bash(chat-
 
 [agent.limits]                 # what agents hold back unless you ask them: chat, codeHost (MRs, issues,
 # chat = "never"               # comments), push, http, credentials. Each "never" (whatever is said),
-                               # "ask" (default; credentials never) or "allow"
+                               # "ask" (default; credentials never) or "allow". "ask" waits for your yes
+                               # in the agent's session: the card says so, with the command to answer it.
