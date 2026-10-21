@@ -477,6 +477,25 @@ function askForText(card, button) {
   };
 }
 
+// A press waits for the script that owns the card. After a minute nobody picked up, the script
+// may not be running: the button can be pressed again (the board takes a second press).
+const PRESS_PATIENCE = 60000;
+function ago(milliseconds) {
+  const seconds = Math.round(milliseconds / 1000);
+  return seconds < 90 ? `${seconds} s ago` : `${Math.round(seconds / 60)} min ago`;
+}
+function waitingButton(b, button, pressedAt) {
+  const waited = Math.max(0, Date.now() - pressedAt);
+  if (waited < PRESS_PATIENCE) {
+    b.disabled = true; b.classList.add('pending');
+    b.title = `Pressed ${ago(waited)}: waiting for the script that looks after this card`;
+    setTimeout(() => { if (b.isConnected) waitingButton(b, button, pressedAt); }, PRESS_PATIENCE - waited + 50);
+    return;
+  }
+  b.disabled = false; b.classList.remove('pending'); b.classList.add('stale');
+  b.title = `Pressed ${ago(waited)} and nothing picked it up: the helper (or whatever script looks after this card) may not be running. Press again to retry.`;
+}
+
 function cardButtons(card) {
   if (!(card.buttons || []).length) return null;
   const row = document.createElement('div');
@@ -486,7 +505,10 @@ function cardButtons(card) {
     b.className = 'card-button';
     b.textContent = button.label;
     if (button.title) b.title = button.title;
-    if (card.pressed && card.pressed.button === button.id) { b.disabled = true; b.classList.add('pending'); }
+    if (card.pressed && card.pressed.button === button.id) {
+      const pressedAt = Date.parse(card.pressed.at || '');
+      waitingButton(b, button, Number.isFinite(pressedAt) ? pressedAt : Date.now());
+    }
     let armed = null; // a button with `confirm` asks first: one click arms it, a second presses it
     b.addEventListener('click', async (e) => {
       e.stopPropagation(); // not a click on the card, which opens it
@@ -497,7 +519,7 @@ function cardButtons(card) {
         return;
       }
       clearTimeout(armed); armed = null;
-      b.disabled = true; b.classList.add('pending');
+      b.disabled = true; b.classList.remove('stale'); b.classList.add('pending');
       try { await api('POST', `/api/cards/${card.id}/press`, { button: button.id }); await reloadWorkspace(); }
       catch (err) { b.disabled = false; b.classList.remove('pending'); toast(err.message); }
     });
