@@ -2,6 +2,9 @@
 // Run: npm test
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { startBoard, stopBoard } from './helpers.js';
 
 let open;     // sign-in off
@@ -127,6 +130,23 @@ test('what is not an item is refused, saying why', async () => {
   assert.equal(status, 400);
   assert.deepEqual(body.problems, ['title is required',
     'source is required: lowercase letters, digits, . _ - (who sent it, e.g. "ci")', 'link.url must be an http or https address']);
+});
+
+test('the items key puts items on the board and does nothing else', async () => {
+  const file = path.join(locked.data, 'items-key');
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  const key = fs.readFileSync(file, 'utf8').trim();
+  assert.notEqual(key, locked.token);
+  const nonce = 'a1'.repeat(16);
+  const { proof } = await (await fetch(`${locked.url}/api/hello?nonce=${nonce}&key=items`)).json();
+  assert.equal(proof, createHmac('sha256', key).update(`driftboard-hello:${nonce}`).digest('hex'));
+  const taken = await send(locked, { source: 'ci', title: 'Posted with the items key' }, key);
+  assert.equal(taken.status, 201);
+  const asKey = { headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' } };
+  assert.equal((await fetch(`${locked.url}/api/state`, asKey)).status, 401);
+  assert.equal((await fetch(`${locked.url}/api/cards/${taken.body.cardId}`, asKey)).status, 401);
+  assert.equal((await fetch(`${locked.url}/api/cards/${taken.body.cardId}/agent`, { method: 'POST', body: '{}', ...asKey })).status, 401);
+  assert.equal((await fetch(`${locked.url}/api/hello?nonce=${nonce}&key=token`)).status, 400);
 });
 
 test('with sign-in on, an item needs the board token', async () => {

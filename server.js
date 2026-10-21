@@ -6,8 +6,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
-import { DATA_DIR, HOST, LEGACY_DATA_DIR, OPENING_DIR, PIN_FILE, PORT, SIGN_IN, TOKEN_FILE, TOKEN_FORMAT_FILE, localURL }
-  from './settings.js';
+import { DATA_DIR, HOST, ITEMS_KEY_FILE, LEGACY_DATA_DIR, OPENING_DIR, PIN_FILE, PORT, SIGN_IN, TOKEN_FILE, TOKEN_FORMAT_FILE,
+  localURL } from './settings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
@@ -297,6 +297,12 @@ const TOKEN = loadToken();
 // Uploaded files load through <img> and <video>, which cannot send a header: their links
 // carry this key instead. It opens the uploads only, never the API.
 const UPLOADS_KEY = createHmac('sha256', TOKEN).update('uploads').digest('hex');
+// A pinger (a chat watcher, a CI job, another tool's script) holds this key, not the token: it
+// opens POST /api/items and nothing else, so it can put items on the board but cannot read
+// cards, press Start or mint card tokens. Written next to the token, private, at every start.
+const ITEMS_KEY = createHmac('sha256', TOKEN).update('driftboard-items').digest('hex');
+fs.writeFileSync(`${ITEMS_KEY_FILE}.tmp`, ITEMS_KEY + '\n', { mode: 0o600 });
+fs.renameSync(`${ITEMS_KEY_FILE}.tmp`, ITEMS_KEY_FILE);
 
 function sameSecret(given, wanted) {
   const a = Buffer.from(String(given ?? ''));
@@ -310,6 +316,7 @@ function requestToken(req) {
 
 function requireToken(req, res, next) {
   if (!SIGN_IN) return next();   // DRIFTBOARD_SIGN_IN=off
+  if (req.method === 'POST' && req.path === '/items' && sameSecret(requestToken(req), ITEMS_KEY)) return next();
   if (!sameSecret(requestToken(req), TOKEN)) {
     return res.status(401).json({ error: 'this board is locked: open it with `npm run open`' });
   }
@@ -393,14 +400,16 @@ app.use('/api', (req, res, next) => {
 // its port (any user of this machine can, while the board is down) before it sends the token.
 // The proof is an HMAC of the client's fresh nonce keyed with the token: only a holder of the
 // token can make it, and it says nothing about the token. Its message never equals `uploads`,
-// so it cannot be used to make the uploads key either.
-const helloProof = (nonce) => createHmac('sha256', TOKEN).update(`driftboard-hello:${nonce}`).digest('hex');
+// so it cannot be used to make the uploads key either. With key=items the proof is keyed with the
+// items key, for a pinger, which holds that key only.
+const helloProof = (nonce, key = TOKEN) => createHmac('sha256', key).update(`driftboard-hello:${nonce}`).digest('hex');
 app.get('/api/hello', (req, res) => {
-  const { nonce } = req.query;
+  const { nonce, key } = req.query;
   if (typeof nonce !== 'string' || !/^[0-9a-f]{16,128}$/i.test(nonce)) {
     return res.status(400).json({ error: 'nonce must be 16 to 128 hex characters' });
   }
-  res.json({ proof: helloProof(nonce) });
+  if (key !== undefined && key !== 'items') return res.status(400).json({ error: 'key is items, or left out for the token' });
+  res.json({ proof: helloProof(nonce, key === 'items' ? ITEMS_KEY : TOKEN) });
 });
 
 // Swap a sign-in code for the token: with the hello, the only calls that need no token.

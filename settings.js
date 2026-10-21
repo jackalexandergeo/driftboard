@@ -22,6 +22,8 @@ export const DATA_DIR = chosen.dir;
 export const LEGACY_DATA_DIR = chosen.legacy;
 export const TOKEN_FILE = path.join(DATA_DIR, 'token');
 export const TOKEN_FORMAT_FILE = path.join(DATA_DIR, 'token-format'); // marks a token made by this version or later
+// The key a pinger holds instead of the token: it puts items on the board and does nothing else.
+export const ITEMS_KEY_FILE = path.join(DATA_DIR, 'items-key');
 // The PIN that signs a tab in from the locked page, as a slow hash (see set-pin.js).
 export const PIN_FILE = path.join(DATA_DIR, 'pin');
 // Sign-in pages that `npm run open` hands the browser (see open.js), private to this user.
