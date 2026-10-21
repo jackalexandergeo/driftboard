@@ -35,8 +35,9 @@ class ClaudeLauncher:
         self.directory = directory
         self._run = run
 
-    def start(self, name, settingsPath, briefPath, prompt):
-        """A new background session; its short id. Raises LaunchError."""
+    def start(self, name, settingsPath, briefPath, prompt, environment=None):
+        """A new background session; its short id. Raises LaunchError. (environment: in the
+        settings file already, for Claude.)"""
         status, output, errors = self._run(
             ["claude", "--bg", "-n", name, "--permission-mode", "auto", "--strict-mcp-config", "--mcp-config",
              json.dumps({"mcpServers": {}}), "--settings", settingsPath, "--append-system-prompt-file", briefPath, prompt],

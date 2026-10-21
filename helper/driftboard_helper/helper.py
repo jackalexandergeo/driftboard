@@ -163,7 +163,8 @@ class Helper:
         outbox = os.path.join(folder, "outbox.jsonl")
         settingsPath = self._writeSettings(folder, outbox)
         prompt = self._firstPrompt(folder)
-        session = self.launcher.start("%s · board" % card.get("title", "card")[:60], settingsPath, BRIEF, prompt)
+        session = self.launcher.start("%s · board" % card.get("title", "card")[:60], settingsPath, BRIEF, prompt,
+                                      self._environment(folder, outbox))
         self.state["runs"][card["id"]] = {"state": "working", "session": session, "token": token, "folder": folder,
                                           "outbox": outbox, "offset": 0, "contexts": contexts, "queued": [],
                                           "startedAt": self._clock()}
@@ -192,6 +193,13 @@ class Helper:
             json.dump(settings, settingsFile, indent=1)
         os.replace(path + ".new", path)
         return path
+
+    def _environment(self, folder, outbox):
+        """For a tool without a settings file (Codex): what a Claude session gets through its settings."""
+        guards = os.path.join(folder, "guards")
+        return {"DRIFTBOARD_OUTBOX": outbox, "DRIFTBOARD_RUN": folder,
+                "DRIFTBOARD_GIT_HOSTS": ",".join(self.config["agent"].get("gitHosts") or []),
+                "PATH": os.pathsep.join([guards, AGENT_BIN, os.environ.get("PATH", "")])}
 
     def _firstPrompt(self, folder):
         agent = self.config["agent"]
@@ -269,7 +277,8 @@ def build(config):
     directory = os.path.expanduser(config["agent"]["directory"])
     if config["agent"]["tool"] == "codex":
         from .codex import CodexLauncher
-        launcher = CodexLauncher(directory)
+        launcher = CodexLauncher(directory, os.path.join(stateDirectory(), "codex.json"),
+                                 model=config["agent"].get("model") or None)
     else:
         launcher = ClaudeLauncher(directory)
     return Helper(config, board, launcher, stateDirectory())
