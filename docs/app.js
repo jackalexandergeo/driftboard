@@ -912,12 +912,24 @@ async function undo() {
     else await reloadWorkspace();
   } catch (e) { toast(e.message); }
 }
+async function redo() {
+  try {
+    const r = await api('POST', '/api/redo');
+    if (r.empty) { toast('Nothing to redo'); return; }
+    if (!r.ok) { toast('Could not redo'); return; }
+    if (r.workspaceId && r.workspaceId !== activeWorkspaceId) await switchWorkspace(r.workspaceId);
+    else await reloadWorkspace();
+  } catch (e) { toast(e.message); }
+}
+// Ctrl/⌘+Z undoes; Ctrl/⌘+Y and Ctrl/⌘+Shift+Z redo. In a text field they edit the text instead.
 document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
-    const t = e.target;
-    if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) return;
-    e.preventDefault(); undo();
-  }
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const key = e.key.toLowerCase();
+  const action = key === 'z' ? (e.shiftKey ? redo : undo) : key === 'y' && !e.shiftKey ? redo : null;
+  if (!action) return;
+  const t = e.target;
+  if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) return;
+  e.preventDefault(); action();
 });
 
 // ---------- modal ----------

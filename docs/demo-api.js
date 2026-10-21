@@ -237,12 +237,27 @@
     return 'file';
   }
   // Soft-delete: overflow purges the oldest entry's files for real.
-  function pushTrash(entry) {
+  // What undo restored, so redo can delete it again; a new deletion forgets it (as server.js).
+  let redoable = [];
+  function pushTrash(entry, { redoing = false } = {}) {
+    if (!redoing) redoable = [];
     state.trash.push(entry);
     while (state.trash.length > TRASH_CAP) {
       const old = state.trash.shift();
       if (old.type === 'card') (old.card.attachments || []).filter((a) => a.filename).forEach((a) => deleteBlob(a.filename));
     }
+  }
+
+  function deleteCard(ws, card, options) {
+    ws.cards = ws.cards.filter((c) => c.id !== card.id);
+    if (card.binderId) reindexBinder(ws, card.binderId);
+    pushTrash({ type: 'card', workspaceId: ws.id, card }, options);
+  }
+  function deleteBinder(ws, binder, options) {
+    const members = ws.cards.filter((c) => c.binderId === binder.id).sort((a, b) => a.order - b.order).map((c) => ({ id: c.id, order: c.order }));
+    ws.cards.filter((c) => c.binderId === binder.id).forEach((c, i) => { c.binderId = null; c.x = binder.x + 16 + (i % 3) * 24; c.y = binder.y + 64 + i * 28; });
+    ws.binders = ws.binders.filter((b) => b.id !== binder.id);
+    pushTrash({ type: 'binder', workspaceId: ws.id, binder, members }, options);
   }
 
   // --- IndexedDB plumbing ----------------------------------------------------
@@ -347,13 +362,7 @@
         if (typeof j.description === 'string') binder.description = j.description;
         await persist(); return binder;
       }
-      if (method === 'DELETE') {
-        const members = ws.cards.filter((c) => c.binderId === binder.id).sort((a, b) => a.order - b.order).map((c) => ({ id: c.id, order: c.order }));
-        ws.cards.filter((c) => c.binderId === binder.id).forEach((c, i) => { c.binderId = null; c.x = binder.x + 16 + (i % 3) * 24; c.y = binder.y + 64 + i * 28; });
-        ws.binders = ws.binders.filter((b) => b.id !== binder.id);
-        pushTrash({ type: 'binder', workspaceId: ws.id, binder, members });
-        await persist(); return { ok: true };
-      }
+      if (method === 'DELETE') { deleteBinder(ws, binder); await persist(); return { ok: true }; }
     }
     // ---- Cards ----
     if (seg[0] === 'api' && seg[1] === 'workspaces' && seg[3] === 'cards' && seg.length === 4 && method === 'POST') {
@@ -377,13 +386,7 @@
         if (typeof j.attSort === 'string' && ['newest', 'oldest', 'custom'].includes(j.attSort)) card.attSort = j.attSort;
         card.updatedAt = now(); await persist(); return card;
       }
-      if (method === 'DELETE') {
-        const { ws } = found;
-        ws.cards = ws.cards.filter((c) => c.id !== card.id);
-        if (card.binderId) reindexBinder(ws, card.binderId);
-        pushTrash({ type: 'card', workspaceId: ws.id, card });
-        await persist(); return { ok: true };
-      }
+      if (method === 'DELETE') { deleteCard(found.ws, card); await persist(); return { ok: true }; }
     }
     if (seg[0] === 'api' && seg[1] === 'cards' && seg[3] === 'move' && seg.length === 4 && method === 'POST') {
       const found = getCard(seg[2]); if (!found) throw err('card not found');
@@ -414,12 +417,23 @@
         if (card.binderId && !ws.binders.some((b) => b.id === card.binderId)) card.binderId = null;
         ws.cards.push(card);
         if (card.binderId) reindexBinder(ws, card.binderId);
+        redoable.push({ type: 'card', workspaceId: ws.id, id: card.id });
         await persist(); return { ok: true, kind: 'card', workspaceId: ws.id };
       }
       ws.binders.push(entry.binder);
       entry.members.forEach((m) => { const c = ws.cards.find((cc) => cc.id === m.id); if (c) { c.binderId = entry.binder.id; c.order = m.order; } });
       reindexBinder(ws, entry.binder.id);
+      redoable.push({ type: 'binder', workspaceId: ws.id, id: entry.binder.id });
       await persist(); return { ok: true, kind: 'binder', workspaceId: ws.id };
+    }
+    if (seg[0] === 'api' && seg[1] === 'redo' && seg.length === 2 && method === 'POST') {
+      const entry = redoable.pop();
+      if (!entry) return { ok: false, empty: true };
+      const ws = getWorkspace(entry.workspaceId);
+      const item = ws && (entry.type === 'card' ? ws.cards : ws.binders).find((each) => each.id === entry.id);
+      if (!item) return { ok: false };
+      if (entry.type === 'card') deleteCard(ws, item, { redoing: true }); else deleteBinder(ws, item, { redoing: true });
+      await persist(); return { ok: true, kind: entry.type, workspaceId: ws.id };
     }
     // ---- Attachments ----
     if (seg[0] === 'api' && seg[1] === 'cards' && seg[3] === 'attachments' && seg.length === 4 && method === 'POST') {

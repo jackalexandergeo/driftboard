@@ -224,7 +224,11 @@ function uniqueWorkspaceName(base) {
 
 // Soft-delete: keep the entry (and any files) so it can be undone. When the
 // buffer overflows, the oldest entry is purged for real and its files removed.
-function pushTrash(entry) {
+// What undo restored, newest last, so redo can delete it again. A new deletion forgets it, as in
+// any editor. In memory only: a restart forgets it too.
+let redoable = [];
+function pushTrash(entry, { redoing = false } = {}) {
+  if (!redoing) redoable = [];
   state.trash.push(entry);
   while (state.trash.length > TRASH_CAP) {
     const old = state.trash.shift();
@@ -802,10 +806,7 @@ app.patch('/api/binders/:id', (req, res) => {
 });
 
 // Delete a binder; its cards spill out onto the canvas near where it was.
-app.delete('/api/binders/:id', (req, res) => {
-  const found = getBinder(req.params.id);
-  if (!found) return res.status(404).json({ error: 'binder not found' });
-  const { ws, binder } = found;
+function deleteBinder(ws, binder, options) {
   const members = ws.cards
     .filter((c) => c.binderId === binder.id)
     .sort((a, b) => a.order - b.order)
@@ -816,7 +817,12 @@ app.delete('/api/binders/:id', (req, res) => {
     c.y = binder.y + 64 + i * 28;
   });
   ws.binders = ws.binders.filter((b) => b.id !== binder.id);
-  pushTrash({ type: 'binder', workspaceId: ws.id, binder, members });
+  pushTrash({ type: 'binder', workspaceId: ws.id, binder, members }, options);
+}
+app.delete('/api/binders/:id', (req, res) => {
+  const found = getBinder(req.params.id);
+  if (!found) return res.status(404).json({ error: 'binder not found' });
+  deleteBinder(found.ws, found.binder);
   persist();
   res.json({ ok: true });
 });
@@ -1125,13 +1131,15 @@ app.post('/api/cards/:id/move', (req, res) => {
 app.delete('/api/cards/:id', (req, res) => {
   const found = getCard(req.params.id);
   if (!found) return res.status(404).json({ error: 'card not found' });
-  const { ws, card } = found;
-  ws.cards = ws.cards.filter((c) => c.id !== card.id);
-  if (card.binderId) reindexBinder(ws, card.binderId);
-  pushTrash({ type: 'card', workspaceId: ws.id, card });
+  deleteCard(found.ws, found.card);
   persist();
   res.json({ ok: true });
 });
+function deleteCard(ws, card, options) {
+  ws.cards = ws.cards.filter((c) => c.id !== card.id);
+  if (card.binderId) reindexBinder(ws, card.binderId);
+  pushTrash({ type: 'card', workspaceId: ws.id, card }, options);
+}
 
 // Undo the most recent card/binder deletion.
 app.post('/api/undo', (req, res) => {
@@ -1145,6 +1153,7 @@ app.post('/api/undo', (req, res) => {
     if (card.binderId && !ws.binders.some((b) => b.id === card.binderId)) card.binderId = null;
     ws.cards.push(card);
     if (card.binderId) reindexBinder(ws, card.binderId);
+    redoable.push({ type: 'card', workspaceId: ws.id, id: card.id });
     persist();
     return res.json({ ok: true, kind: 'card', workspaceId: ws.id });
   }
@@ -1155,8 +1164,22 @@ app.post('/api/undo', (req, res) => {
     if (c) { c.binderId = entry.binder.id; c.order = m.order; }
   });
   reindexBinder(ws, entry.binder.id);
+  redoable.push({ type: 'binder', workspaceId: ws.id, id: entry.binder.id });
   persist();
   res.json({ ok: true, kind: 'binder', workspaceId: ws.id });
+});
+
+// Redo: delete again what the last undo brought back.
+app.post('/api/redo', (req, res) => {
+  const entry = redoable.pop();
+  if (!entry) return res.json({ ok: false, empty: true });
+  const ws = getWorkspace(entry.workspaceId);
+  const item = ws && (entry.type === 'card' ? ws.cards : ws.binders).find((each) => each.id === entry.id);
+  if (!item) return res.json({ ok: false });   // gone or moved meanwhile
+  if (entry.type === 'card') deleteCard(ws, item, { redoing: true });
+  else deleteBinder(ws, item, { redoing: true });
+  persist();
+  res.json({ ok: true, kind: entry.type, workspaceId: ws.id });
 });
 
 // ---- Attachments ----
