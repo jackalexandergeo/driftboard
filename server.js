@@ -397,6 +397,15 @@ app.post('/api/pin', express.json({ limit: '1kb' }), (req, res) => {
 // its result, and moves between the working columns. It can never reach another card, move
 // one to Done or Won't do, press a button or start anything: those are the user's.
 const AGENT_COLUMNS = ['Working', 'Needs you', 'Review'];
+// A board may call its working columns otherwise (kept from another tool, say): each of the agent's
+// three is the first of these names the board has.
+const AGENT_COLUMN_NAMES = {
+  Working: ['Working', 'Researching', 'In progress', 'In Progress', 'Doing'],
+  'Needs you': ['Needs you', 'Blocked'],
+  Review: ['Review', 'Proposed', 'In review', 'Reviewing'],
+};
+const agentColumn = (ws, column) => (AGENT_COLUMN_NAMES[column] || [])
+  .map((name) => ws.binders.find((binder) => binder.title === name)).find(Boolean) || null;
 const CLOSED_COLUMNS = ['Done', "Won't do"];
 const AGENT_LIMITS = { progress: 300, question: 2000, result: 20000, content: 20000, text: 8000 };
 const CHAT_KEPT = 500; // the newest messages a card keeps
@@ -474,7 +483,7 @@ agentApi.post('/cards/:id/ask', (req, res) => {   // {question}: the card goes t
   card.agent.question = question;
   card.agent.askedAt = now();
   addChat(card, 'agent', question, 'question');
-  const binder = ws.binders.find((b) => b.title === 'Needs you');
+  const binder = agentColumn(ws, 'Needs you');
   if (binder) moveCard(ws, card, binder);
   card.updatedAt = now();
   persist();
@@ -492,7 +501,7 @@ agentApi.post('/cards/:id/move', (req, res) => {   // {column}: Working, Needs y
   const found = agentCard(req, res); if (!found) return;
   const { ws, card } = found;
   const column = typeof req.body?.column === 'string' ? req.body.column.trim() : '';
-  const binder = AGENT_COLUMNS.includes(column) && ws.binders.find((b) => b.title === column);
+  const binder = AGENT_COLUMNS.includes(column) && agentColumn(ws, column);
   if (!binder) return res.status(400).json({ error: `an agent moves its card only to ${AGENT_COLUMNS.join(', ')}` });
   moveCard(ws, card, binder);
   if (column !== 'Needs you') delete card.agent.question;   // answered: back to work, or done

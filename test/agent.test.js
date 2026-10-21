@@ -83,6 +83,21 @@ test('once the user closes the card, or the token is revoked, the agent can chan
   assert.ok((await cardOf(other.cardId)).agent.stoppedAt);
 });
 
+test("an agent's columns are the board's own, whatever it calls them", async () => {
+  const { cardId, workspaceId } = (await call(board, 'POST', '/api/items',
+    { source: 'test', title: 'Own columns', workspace: 'Kept columns' }, board.token)).body;
+  const workspace = (await call(board, 'GET', `/api/workspaces/${workspaceId}`, undefined, board.token)).body;
+  for (const [from, to] of [['Working', 'Researching'], ['Review', 'Proposed']]) {
+    const binder = workspace.binders.find((each) => each.title === from);
+    await call(board, 'PATCH', `/api/binders/${binder.id}`, { title: to }, board.token);
+  }
+  const token = await agentFor(cardId);
+  await call(board, 'POST', `/api/agent/cards/${cardId}/move`, { column: 'Working' }, token);
+  assert.equal(await columnOf(cardId, workspaceId), 'Researching');
+  await call(board, 'POST', `/api/agent/cards/${cardId}/move`, { column: 'Review' }, token);
+  assert.equal(await columnOf(cardId, workspaceId), 'Proposed');
+});
+
 test('only a holder of the board token mints a card token', async () => {
   const { cardId } = await newCard('Mint');
   assert.equal((await call(board, 'POST', `/api/cards/${cardId}/agent`, {})).status, 401);
