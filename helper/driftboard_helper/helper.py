@@ -367,6 +367,10 @@ class Helper:
             with open(os.path.join(folder, "card.md"), "w") as cardFile:
                 cardFile.write(cardMarkdown(card, contexts))
             outbox = os.path.join(folder, "outbox.jsonl")
+            if os.path.exists(outbox):
+                os.remove(outbox)   # a run before this one (a card brought back): its reports went then
+            # at work (the board may call it Researching, In progress): first, before the agent's own reports
+            append(outbox, {"kind": "move", "column": "Working"})
             settingsPath = self._writeSettings(folder, outbox, control)
             prompt = self._firstPrompt(folder)
             session = self.launcher.start("%s · board" % card.get("title", "card")[:60], settingsPath, BRIEF, prompt,
@@ -469,6 +473,7 @@ class Helper:
         full = run.get("fullSession") or (self._states or {}).get(run["session"], (None, None))[1]
         if not full:
             raise LaunchError("no full session id for %s yet" % run["session"])
+        append(run["outbox"], {"kind": "move", "column": "Working"})   # back at work, off Needs you or Review: before its own reports
         run["session"] = self.launcher.resume(run["session"], full, message)
         run.update(state="working", turnAt=self._clock(), seenWorking=False, asked=False, approvalShown=False)
         logger.info("card %s: woke its agent", cardId)

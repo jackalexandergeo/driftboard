@@ -371,6 +371,26 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(opened, [(["claude", "attach", session], self.project, "")])
         self.assertNotIn("pressed", self.card(cardId))
 
+    def testACardMovesToWorkingWhenItsAgentStartsOrIsWoken(self):
+        # The user: "2 tickets are running, they say new but should be under researching".
+        self.claude.turns = [[("progress", "reading")], [("progress", "back at it")]]
+        cardId = self.item("Move me")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        self.helper.passOnce()
+        self.assertEqual(self.board.column(cardId), "Working")
+        found = self.board.call("GET", "/api/cards/%s" % cardId)
+        workspace = self.board.call("GET", "/api/workspaces/%s" % found["workspaceId"])
+        review = next(binder["id"] for binder in workspace["binders"] if binder["title"] == "Review")
+        self.board.call("POST", "/api/cards/%s/move" % cardId, {"binderId": review, "toIndex": 0})   # the work is in Review
+        self.now += 31
+        self.helper.passOnce()   # its turn is over
+        self.press(cardId, "reply", "Not quite: redo the totals.")
+        self.settle()
+        self.assertEqual(self.board.column(cardId), "Working")   # sent back: at work again
+
     def testACardDeletedThenBroughtBackStartsAfresh(self):
         # Live: the user undid a deletion, and the card came back with its run closed and no buttons.
         cardId = self.item("Undo me")
