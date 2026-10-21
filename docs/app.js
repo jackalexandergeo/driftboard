@@ -1604,11 +1604,13 @@ function closeTerminal() {
   try { socket.close(); } catch { /* closed already */ }
   term.dispose();
   terminalPanel.classList.add('hidden');
+  $('terminal-backdrop').classList.add('hidden');
 }
 async function showTerminal(card) {
   closeTerminal();
   try { await loadTerminalLibrary(); } catch (error) { toast(error.message); return; }
   terminalPanel.classList.remove('hidden');
+  $('terminal-backdrop').classList.remove('hidden');
   $('terminal-title').textContent = `${card.agent?.name || 'Agent'} · ${card.title}`;
   // Pop out: the same session in a window of the user's terminal app (the helper opens it).
   $('terminal-popout').classList.toggle('hidden', !(card.buttons || []).some((button) => button.id === 'terminal'));
@@ -1652,6 +1654,15 @@ async function showTerminal(card) {
   socket.addEventListener('close', () => { if (terminal?.socket === socket && !ended) status('disconnected (the agent keeps running): close it, or open it again'); });
 }
 $('terminal-close').addEventListener('click', closeTerminal);
+// A click outside the terminal closes it, and only that: it does not reach the card or board under it.
+// Pressed and released on the backdrop, so a selection dragged out of the terminal does not count.
+let backdropPressed = false;
+$('terminal-backdrop').addEventListener('pointerdown', (e) => { backdropPressed = e.target.id === 'terminal-backdrop'; });
+$('terminal-backdrop').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (backdropPressed) closeTerminal();
+  backdropPressed = false;
+});
 $('terminal-popout').addEventListener('click', async () => {
   if (!terminal) return;
   const { cardId } = terminal;

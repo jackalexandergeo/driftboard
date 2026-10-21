@@ -507,6 +507,7 @@ body.att-reordering { cursor: grabbing; user-select: none; -webkit-user-select: 
 
 /* The agent's terminal: above the open card, as big as the window allows. */
 .agent-actions { display: flex; gap: 6px; margin-left: auto; }
+.terminal-backdrop { position: fixed; inset: 0; z-index: 119; background: rgba(15, 20, 24, 0.35); }
 .terminal-panel {
   position: fixed; inset: 4vh 4vw; z-index: 120; display: flex; flex-direction: column;
   background: var(--terminal-bg); border-radius: var(--radius); box-shadow: var(--shadow-lg); overflow: hidden;
