@@ -12,7 +12,7 @@
     maxAgents = 3                   # more starts wait their turn
     gitHosts = []                   # hosts git may fetch from over ssh, e.g. ["github.com"]
     rules = []                      # your own hard rules, for every agent
-    denyCommands = []               # extra Claude Code deny rules, e.g. ["Bash(mm *post create*)"]
+    denyCommands = []               # extra Claude Code deny rules, e.g. ["Bash(chat-cli *send*)"]
 
     [agent.access]                  # other machines, per command: "deny" (default), "ask" or "allow"
     ssh = "deny"
