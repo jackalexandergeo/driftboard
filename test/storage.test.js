@@ -71,6 +71,20 @@ test('with no good copy, a board file that cannot be read stops the board, untou
   }
 });
 
+test('with sign-in off, the board will not listen where other machines reach it', async () => {
+  const data = newDataFolder();
+  try {
+    const server = spawn(process.execPath, [path.join(root, 'server.js')], { stdio: ['ignore', 'ignore', 'pipe'],
+      env: { ...process.env, PORT: '0', DRIFTBOARD_DATA: data, DRIFTBOARD_SIGN_IN: 'off', DRIFTBOARD_HOST: '0.0.0.0' } });
+    let errors = '';
+    server.stderr.on('data', (chunk) => { errors += chunk; });
+    assert.equal(await new Promise((resolve) => server.on('exit', resolve)), 1);
+    assert.match(errors, /would let anyone who can reach this machine read and change the board: it did not start/);
+  } finally {
+    fs.rmSync(data, { recursive: true, force: true });
+  }
+});
+
 test('a write cut off between its two renames is picked up from the written file', async () => {
   const data = newDataFolder();
   fs.writeFileSync(path.join(data, 'board.json.tmp'), board('Newest'));

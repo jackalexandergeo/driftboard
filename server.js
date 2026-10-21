@@ -7,9 +7,14 @@ import fsp from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { DATA_DIR, HOST, ITEMS_KEY_FILE, LEGACY_DATA_DIR, OPENING_DIR, PIN_FILE, PORT, SIGN_IN, TOKEN_FILE, TOKEN_FORMAT_FILE,
-  localURL } from './settings.js';
+  isLoopback, localURL } from './settings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+if (!SIGN_IN && !isLoopback(HOST)) {
+  console.error(`DRIFTBOARD_SIGN_IN=off with DRIFTBOARD_HOST=${HOST} would let anyone who can reach this machine read and `
+    + 'change the board: it did not start. Keep sign-in on to reach it from other devices, or leave DRIFTBOARD_HOST out.');
+  process.exit(1);
+}
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const BOARD_FILE = path.join(DATA_DIR, 'board.json');
 const BOARD_TEMP_FILE = `${BOARD_FILE}.tmp`;
