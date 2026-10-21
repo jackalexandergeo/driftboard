@@ -97,6 +97,11 @@ a starter helper config, and prints what to run next. Then:
 Without sign-in, they open `http://127.0.0.1:4321/` themselves. The board keeps its data in
 `~/.local/share/driftboard`.
 
+Put a first card on the board with the pinger now: it makes the Inbox, which the helper's
+`check` in step 5 looks for, and step 6 tries an agent on it.
+
+    ~/driftboard/pinger/driftboard-ping "Try an agent: list the top-level folders of the project folder and say which are git repositories" --source bootstrap
+
 ## 5. Write the helper's config
 
 Fill `~/.config/driftboard-helper/config.toml` from their answers, **print it in the chat**,
@@ -125,22 +130,19 @@ rules = []                          # question 4
 app = ""                            # question 9
 ```
 
-Then check it, and have the user start the helper:
+Then check it, and once it passes, have the user start the helper:
 
     ~/driftboard/helper/bin/driftboard-helper check
     ! systemctl --user enable --now driftboard-helper     # the user types this
 
-`check` says what is in the way and how to fix it. Until step 6 it says the Inbox is missing:
-the Inbox appears with the first card.
+`check` says what is in the way and how to fix it. If it says the Inbox is missing, the first
+card (step 4) is not on the board yet. Run the two apart, not chained with `&&`: a failing
+`check` would keep the helper from starting.
 
 ## 6. Test it end to end
 
-Put a first card on the board with the pinger:
-
-    ~/driftboard/pinger/driftboard-ping "Try an agent: list the top-level folders of the project folder and say which are git repositories" --source bootstrap
-
-**Ask** the user to open the board: the card is in the Inbox's New column with ▶ Start and
-＋ Context. They press ▶ Start. Within a few seconds the card says the agent started; then its
+**Ask** the user to open the board: the first card (step 4) is in the Inbox's New column with
+▶ Start and ＋ Context. They press ▶ Start. Within a few seconds the card says the agent started; then its
 progress shows on the card, its answer in the open card, and the card moves to Review. They
 can write to the agent in the card's chat at any time. When they are happy, they move the card
 to Done, which stops the agent for good.
@@ -175,7 +177,7 @@ thread=..., link=...)` for each thing worth a card, from a loop or a cron job. T
 | Symptom | Look at |
 |---|---|
 | an install is refused (auto mode) | expected: the user runs it as a `! <command>` line (see the rules) |
-| `check` names a problem | it says the fix: install or sign in to the tool, start the board, add the Inbox (step 6) |
+| `check` names a problem | it says the fix: install or sign in to the tool, start the board, add the Inbox (the first card, step 4) |
 | the board asks to sign in | open it with `npm --prefix ~/driftboard run open`, not by typing the address |
 | ▶ Start does nothing | the helper is not running: `systemctl --user status driftboard-helper`; after a minute the button says so |
 | the card says it could not start | the tool is missing or signed out: `claude` / `codex login` |
