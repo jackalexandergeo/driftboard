@@ -3,6 +3,7 @@
 import { randomBytes, scrypt } from 'node:crypto';
 import fs from 'node:fs';
 import readline from 'node:readline';
+import { Writable } from 'node:stream';
 import { PIN_FILE } from './settings.js';
 
 const N = 2 ** 15; // about 0.1 s and 32 MB per try: slow for a guesser, quick for the user
@@ -13,11 +14,15 @@ if (process.argv.includes('--remove')) {
   process.exit(0);
 }
 
+// The question is written here, and readline's own output goes nowhere: on a backspace or any edit
+// it redraws the prompt with the line typed so far, which would show the PIN.
+const nowhere = new Writable({ write(chunk, encoding, done) { done(); } });
 function ask(question) {
   return new Promise((resolve) => {
-    const prompt = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    prompt._writeToOutput = (text) => { if (text.includes(question)) process.stdout.write(text); }; // no echo
-    prompt.question(question, (answer) => { prompt.close(); process.stdout.write('\n'); resolve(answer); });
+    process.stdout.write(question);
+    const prompt = readline.createInterface({ input: process.stdin, output: nowhere, terminal: true });
+    prompt.on('SIGINT', () => { process.stdout.write('\n'); process.exit(130); });   // Ctrl-C: nothing changed
+    prompt.question('', (answer) => { prompt.close(); process.stdout.write('\n'); resolve(answer); });
   });
 }
 
