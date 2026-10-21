@@ -1002,8 +1002,9 @@ app.patch('/api/cards/:id', (req, res) => {
   if (req.body.pressedAt !== undefined && (req.body.pressed !== null || typeof req.body.pressedAt !== 'string')) {
     return res.status(400).json({ error: 'pressedAt goes with pressed: null: the `at` of the press the script handled' });
   }
-  if (req.body.chat !== undefined && typeof req.body.chat !== 'boolean') {
-    return res.status(400).json({ error: 'chat must be true or false: whether the open card offers a chat with its agent' });
+  const chatEnabled = req.body.chatEnabled ?? req.body.chat;   // chat: the same, for short
+  if (chatEnabled !== undefined && typeof chatEnabled !== 'boolean') {
+    return res.status(400).json({ error: 'chatEnabled (or chat) must be true or false: whether the open card offers a chat with its agent' });
   }
   const { card } = found;
   if (typeof req.body.title === 'string') card.title = req.body.title;
@@ -1021,8 +1022,8 @@ app.patch('/api/cards/:id', (req, res) => {
   // stays for its next look. Without pressedAt (older scripts) any press is cleared.
   if (req.body.pressed === null && (req.body.pressedAt === undefined || card.pressed?.at === req.body.pressedAt)) delete card.pressed;
   // A script that talks to the card's agent offers the chat (card.chat holds the messages themselves).
-  if (req.body.chat === true) card.chatEnabled = true;
-  else if (req.body.chat === false) delete card.chatEnabled;
+  if (chatEnabled === true) card.chatEnabled = true;
+  else if (chatEnabled === false) delete card.chatEnabled;
   card.updatedAt = now();
   persist();
   res.json(card);
