@@ -1,0 +1,4 @@
+#!/bin/sh
+# What an agent runs to keep its card current (see driftboard_helper/agentctl.py).
+here="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHONPATH="$here" exec python3 -P -m driftboard_helper.agentctl "$@"

@@ -5,3 +5,5 @@ CLAUDE.md
 # Your board data + uploaded media. Remove this line if you want to
 # version-control your todos, but be aware media files can get large.
 data/
+__pycache__/
+*.pyc

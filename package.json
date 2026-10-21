@@ -8,7 +8,8 @@
     "start": "node server.js",
     "open": "node open.js",
     "set-pin": "node set-pin.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:helper": "cd helper && python3 -m unittest discover -s tests -t ."
   },
   "dependencies": {
     "dompurify": "^3.4.12",
