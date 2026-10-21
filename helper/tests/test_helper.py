@@ -371,6 +371,19 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(opened, [(["claude", "attach", session], self.project, "")])
         self.assertNotIn("pressed", self.card(cardId))
 
+    def testACardDeletedThenBroughtBackStartsAfresh(self):
+        # Live: the user undid a deletion, and the card came back with its run closed and no buttons.
+        cardId = self.item("Undo me")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.settle()
+        self.board.call("DELETE", "/api/cards/%s" % cardId)
+        self.helper.passOnce()
+        self.assertEqual(self.helper.state["runs"][cardId]["state"], "closed")
+        self.board.call("POST", "/api/undo")
+        self.helper.passOnce()
+        self.assertEqual(self.buttons(cardId), [START["id"], CONTEXT["id"]])
+
     def testAWindowThatCannotOpenSaysOnTheCardWhatToRun(self):
         cardId = self.item("No terminal app")
         self.helper.passOnce()

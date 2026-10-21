@@ -175,6 +175,7 @@ class Helper:
                 continue
             logger.info("card %s %s: closing its run", cardId, where)
             self._close(cardId, run)
+            run["gone"] = True   # should the card come back (an undo), it starts afresh
 
     def _prune(self):
         """Closed runs are kept a week (what the agent did stays on the card), then forgotten: state,
@@ -196,6 +197,9 @@ class Helper:
     def _card(self, card, column):
         runs = self.state["runs"]
         run = runs.get(card["id"])
+        if run and run.get("gone") and run.get("state") == "closed" and column not in CLOSED_COLUMNS:
+            del runs[card["id"]]   # deleted, then brought back: a card like any other again (▶ Start)
+            run = None
         if column in CLOSED_COLUMNS:
             if run and run.get("state") != "closed":
                 self._close(card["id"], run)
