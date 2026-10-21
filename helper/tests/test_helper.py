@@ -223,7 +223,8 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(len(self.claude.sessions), 2)
 
     def testTheSessionsSettingsHoldTheFloorAndTheUsersAccess(self):
-        self.helper = self.newHelper(access={"ssh": "ask"}, rules=["Never touch the production ledger."])
+        self.helper = self.newHelper(access={"ssh": "ask"}, rules=["Never touch the production ledger."],
+                                     limits={"codeHost": "never", "push": "never", "http": "never"})
         cardId = self.item("Settings")
         self.helper.passOnce()
         self.press(cardId, "start")
@@ -232,7 +233,7 @@ class HelperTest(unittest.TestCase):
         permissions = session["settings"]["permissions"]
         for rule in ("Bash(git *push*)", "Bash(gh *pr merge*)", "Bash(glab *mr note*)", "Bash(curl *--data*)", "Read(~/.ssh/**)"):
             self.assertIn(rule, permissions["deny"])
-        self.assertEqual(permissions["ask"], ["Bash(ssh *)"])
+        self.assertIn("Bash(ssh *)", permissions["ask"])
         self.assertIn("Never touch the production ledger.", session["settings"]["autoMode"]["hard_deny"])
         with open(session["env"]["CLAUDE_ENV_FILE"]) as environmentFile:
             first = environmentFile.read().split("=", 1)[1].split(":")[0]

@@ -16,19 +16,22 @@
 
     [agent.access]                  # other machines, per command: "deny" (default), "ask" or "allow"
     ssh = "deny"
+
+    [agent.limits]                  # what agents hold back unless you ask: chat, codeHost, push, http,
+    chat = "never"                  # credentials; each "never", "ask" (default; credentials never) or "allow"
 """
 
 import copy
 import os
 import tomllib
 
-from .rules import ACCESS_LEVELS, COMMAND_NAME
+from .rules import ACCESS_LEVELS, COMMAND_NAME, DEFAULT_LIMITS, LIMIT_LEVELS
 
 TOOLS = ("claude", "codex")
 DEFAULTS = {
     "board": {"url": "http://127.0.0.1:4321", "tokenFile": "~/.local/share/driftboard/token", "workspaces": ["Inbox"]},
     "agent": {"tool": "claude", "directory": "", "model": "", "maxAgents": 3, "gitHosts": [], "rules": [],
-              "denyCommands": [], "access": {}},
+              "denyCommands": [], "access": {}, "limits": {}},
     "intervalSeconds": 3,
 }
 
@@ -92,6 +95,14 @@ def configProblems(config):
                 problems.append("agent.access: %s = %r: a command name, each %s" % (command, level, ", ".join(ACCESS_LEVELS)))
             elif level == "ask" and agent.get("tool") != "claude":
                 problems.append('agent.access: %s = "ask" needs Claude Code: Codex cannot stop and ask you' % command)
+    limits = agent.get("limits")
+    if not isinstance(limits, dict):
+        problems.append("agent.limits must be a table")
+    else:
+        for kind, level in limits.items():
+            if kind not in DEFAULT_LIMITS or level not in LIMIT_LEVELS:
+                problems.append("agent.limits: %s = %r: kinds are %s; each %s"
+                                % (kind, level, ", ".join(DEFAULT_LIMITS), ", ".join(LIMIT_LEVELS)))
     if not isinstance(board.get("workspaces"), list) or not board["workspaces"]:
         problems.append("board.workspaces must name at least one board")
     interval = config.get("intervalSeconds")

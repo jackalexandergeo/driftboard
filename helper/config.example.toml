@@ -17,3 +17,7 @@ denyCommands = []              # extra Claude Code deny rules, e.g. ["Bash(chat-
 
 [agent.access]                 # other machines, per command: "deny" (default), "ask" or "allow"
 # ssh = "ask"                  # ask: every use waits for your yes (Claude only)
+
+[agent.limits]                 # what agents hold back unless you ask them: chat, codeHost (MRs, issues,
+# chat = "never"               # comments), push, http, credentials. Each "never" (whatever is said),
+                               # "ask" (default; credentials never) or "allow"
