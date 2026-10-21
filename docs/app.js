@@ -212,8 +212,10 @@ async function request(method, url, body, isForm) {
     try { res = await fetch(url, opts); } catch { goAway(); throw awayError(); }
     if (res.status === 401) { goAway(); throw awayError(); }
     const answer = res.status === 204 ? null : await res.json().catch(() => undefined);
-    if (answer === undefined) { goAway(); throw awayError(); } // not the board's answer
     if (isWrite) noteWrite(res);
+    // The board just proved itself: an answer that is not JSON (a route an older server lacks,
+    // a proxy's error page) is an error to show, not the board going away.
+    if (answer === undefined) throw Object.assign(new Error(`the board answered HTTP ${res.status} without its usual reply`), { status: res.status });
     if (!res.ok) throw Object.assign(new Error(answer?.error || 'request failed'), { status: res.status });
     return { data: answer, revision: Number(res.headers.get('X-Board-Revision')) || null };
   } finally {
