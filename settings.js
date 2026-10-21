@@ -29,6 +29,11 @@ export const PIN_FILE = path.join(DATA_DIR, 'pin');
 // Sign-in pages that `npm run open` hands the browser (see open.js), private to this user.
 export const OPENING_DIR = path.join(DATA_DIR, 'opening');
 export const PORT = process.env.PORT || 4321;
+// The helper's socket for a card's terminal (helper/driftboard_helper/terminal.py), in its state folder.
+const helperState = process.env.DRIFTBOARD_HELPER_STATE
+  || path.join(process.env.XDG_STATE_HOME && path.isAbsolute(process.env.XDG_STATE_HOME) ? process.env.XDG_STATE_HOME
+    : path.join(os.homedir(), '.local', 'state'), 'driftboard-helper');
+export const HELPER_SOCKET = process.env.DRIFTBOARD_HELPER_SOCKET || path.join(helperState, 'terminal.sock');
 // Only this machine by default. Not plain HOST: tcsh and many CI systems set that to the
 // machine's name, which would quietly open the board to the network.
 export const HOST = process.env.DRIFTBOARD_HOST || '127.0.0.1';

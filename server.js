@@ -6,7 +6,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
-import { DATA_DIR, HOST, ITEMS_KEY_FILE, LEGACY_DATA_DIR, OPENING_DIR, PIN_FILE, PORT, SIGN_IN, TOKEN_FILE, TOKEN_FORMAT_FILE,
+import { attachTerminals } from './terminal.js';
+import { DATA_DIR, HELPER_SOCKET, HOST, ITEMS_KEY_FILE, LEGACY_DATA_DIR, OPENING_DIR, PIN_FILE, PORT, SIGN_IN, TOKEN_FILE, TOKEN_FORMAT_FILE,
   isLoopback, localURL } from './settings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1288,7 +1289,7 @@ app.use((err, req, res, next) => {
 // there, relay the hello to the board (the proof would check out) and take the token.
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '::1'];
 const listenHosts = LOOPBACK_HOSTS.includes(HOST) && Number(PORT) !== 0 ? ['127.0.0.1', '::1'] : [HOST];
-listenHosts.forEach((host, index) => {
+const servers = listenHosts.map((host, index) => {
   const server = app.listen(PORT, host, index === 0 ? started : undefined);
   server.on('error', (error) => {
     if (index === 0) { console.error(`the board cannot listen on ${host}:${PORT}: ${error.message}`); process.exit(1); }
@@ -1297,6 +1298,14 @@ listenHosts.forEach((host, index) => {
         + `instead of the board. Clients should use ${localURL()}.`);
     }   // no IPv6 here: nothing to hold
   });
+  return server;
+});
+attachTerminals(servers, {
+  allowed: (req) => knownHost(req.headers.host),
+  cardOf: (cardId) => getCard(cardId)?.card,
+  signIn: SIGN_IN,
+  tokenMatches: (given) => typeof given === 'string' && sameSecret(given, TOKEN),
+  socketPath: HELPER_SOCKET,
 });
 function started() {
   console.log(SIGN_IN ? `driftboard running at ${localURL()}; open it with: npm run open`

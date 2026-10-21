@@ -22,10 +22,10 @@ export function newDataFolder() {
 }
 
 // data: a folder made with newDataFolder() and filled by the test.
-export async function startBoard(signIn, { data = newDataFolder() } = {}) {
+export async function startBoard(signIn, { data = newDataFolder(), env = {} } = {}) {
   const port = await freePort();
   const server = spawn(process.execPath, [path.join(root, 'server.js')], {
-    env: { ...process.env, PORT: String(port), DRIFTBOARD_DATA: data, DRIFTBOARD_SIGN_IN: signIn ? 'on' : 'off' },
+    env: { ...process.env, PORT: String(port), DRIFTBOARD_DATA: data, DRIFTBOARD_SIGN_IN: signIn ? 'on' : 'off', ...env },
     stdio: 'ignore',
   });
   const url = `http://127.0.0.1:${port}`;
