@@ -188,6 +188,8 @@ class Helper:
             self.launcher.stop(run["session"])
             run["state"] = "stopped"
         elif button == "resume" and run and run.get("state") == "stopped":
+            if not self._slotFree():
+                return False
             self._wake(card["id"], run, "The user pressed Resume: carry on where you left off.")
         elif button in ("reply", "context") and not text:
             logger.warning("card %s: %s pressed without text (is the board older than the helper?)", card["id"], button)
@@ -264,7 +266,11 @@ class Helper:
             self._tell(cardId, run, "%s: %s" % (label, text))
 
     def _running(self):
-        return len([run for run in self.state["runs"].values() if run.get("state") in ACTIVE])
+        """Agents at work: an idle one (its turn over) holds no slot."""
+        return len([run for run in self.state["runs"].values() if run.get("state") == "working"])
+
+    def _slotFree(self):
+        return self._running() < self.config["agent"]["maxAgents"]
 
     # ---- starting, waking, stopping -----------------------------------------------
 
@@ -335,7 +341,7 @@ class Helper:
 
     def _tell(self, cardId, run, message):
         """Wake the agent with a message, or keep it for when its turn ends (or the wake works)."""
-        if run.get("state") == "working":
+        if run.get("state") == "working" or not self._slotFree():
             run.setdefault("queued", []).append(message)
             return
         try:
@@ -386,6 +392,15 @@ class Helper:
                 self._watchRun(cardId, run)
             except Exception:
                 logger.exception("card %s: unexpected error while watching its agent", cardId)
+        # then the messages kept for later, now that every run's state (and so every slot) is known
+        for cardId, run in self.state["runs"].items():
+            if run.get("state") in ("idle", "stopped") and run.get("queued") and self._slotFree():
+                message = "\n\n".join(run.pop("queued"))
+                try:
+                    self._wake(cardId, run, message)
+                except LaunchError as error:
+                    run["queued"] = [message]
+                    logger.warning("card %s: could not wake its agent: %s", cardId, error)
 
     def _watchRun(self, cardId, run):
         relay = self._relays.get(cardId)
@@ -410,13 +425,6 @@ class Helper:
             logger.warning("card %s: its %s session %s failed", cardId, self.launcher.tool, run["session"])
         elif run["state"] == "working" and listed and listed[0] in TURN_OVER and settled:
             run["state"] = "idle"   # its turn is over: it asked, finished, or stopped by itself
-        if run["state"] == "idle" and run.get("queued"):
-            message = "\n\n".join(run.pop("queued"))
-            try:
-                self._wake(cardId, run, message)
-            except LaunchError as error:
-                run["queued"] = [message]
-                logger.warning("card %s: could not wake its agent: %s", cardId, error)
 
     def _save(self):
         path = self.statePath + ".new"

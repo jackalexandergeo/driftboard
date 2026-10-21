@@ -9,7 +9,7 @@
     tool = "claude"                 # or "codex"
     directory = "~/work"            # where agents start: a project folder, not the home folder
     model = ""                      # the tool's default when empty
-    maxAgents = 3                   # more starts wait their turn
+    maxAgents = 1                   # agents at work at once; more wait their turn (they share the folder)
     gitHosts = []                   # hosts git may fetch from over ssh, e.g. ["github.com"]
     rules = []                      # your own hard rules, for every agent
     denyCommands = []               # extra Claude Code deny rules, e.g. ["Bash(chat-cli *send*)"]
@@ -30,7 +30,7 @@ from .rules import ACCESS_LEVELS, COMMAND_NAME, DEFAULT_LIMITS, LIMIT_LEVELS
 TOOLS = ("claude", "codex")
 DEFAULTS = {
     "board": {"url": "http://127.0.0.1:4321", "tokenFile": "~/.local/share/driftboard/token", "workspaces": ["Inbox"]},
-    "agent": {"tool": "claude", "directory": "", "model": "", "maxAgents": 3, "gitHosts": [], "rules": [],
+    "agent": {"tool": "claude", "directory": "", "model": "", "maxAgents": 1, "gitHosts": [], "rules": [],
               "denyCommands": [], "access": {}, "limits": {}},
     "intervalSeconds": 3,
 }

@@ -459,6 +459,41 @@ class HelperTest(unittest.TestCase):
         self.helper.passOnce()
         self.assertEqual(len(self.claude.sessions), 2)
 
+    def testAnAgentWhoseTurnEndedHoldsNoSlot(self):
+        self.helper = self.newHelper(maxAgents=1)
+        first, second = self.item("First"), self.item("Second")
+        self.helper.passOnce()
+        self.press(first, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        self.now += 31
+        self.helper.passOnce()   # its turn ended: idle, in Needs you
+        self.press(second, "start")
+        self.helper.passOnce()
+        self.assertEqual(len(self.claude.sessions), 2)
+
+    def testAWakeWaitsForAFreeSlot(self):
+        self.helper = self.newHelper(maxAgents=1)
+        first, second = self.item("First"), self.item("Second")
+        self.helper.passOnce()
+        self.press(first, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        self.now += 31
+        self.helper.passOnce()
+        self.press(second, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        firstSession, secondSession = self.claude.sessions.values()
+        secondSession["state"] = "working"   # still at work: the one slot is taken
+        self.press(first, "reply", "The 2026 ledger.")
+        self.helper.passOnce()
+        self.assertEqual(firstSession["messages"], [])   # kept, not woken past the limit
+        secondSession["state"] = "done"
+        self.now += 31
+        self.helper.passOnce()   # the slot is free: woken with it
+        self.assertEqual(firstSession["messages"], ["The user replied: The 2026 ledger."])
+
     def testTheSessionsSettingsHoldTheFloorAndTheUsersAccess(self):
         self.helper = self.newHelper(access={"ssh": "ask"}, rules=["Never touch the production ledger."],
                                      limits={"codeHost": "never", "push": "never", "http": "never"})
