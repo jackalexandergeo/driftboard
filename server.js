@@ -398,7 +398,17 @@ app.post('/api/pin', express.json({ limit: '1kb' }), (req, res) => {
 // one to Done or Won't do, press a button or start anything: those are the user's.
 const AGENT_COLUMNS = ['Working', 'Needs you', 'Review'];
 const CLOSED_COLUMNS = ['Done', "Won't do"];
-const AGENT_LIMITS = { progress: 300, question: 2000, result: 20000, content: 20000 };
+const AGENT_LIMITS = { progress: 300, question: 2000, result: 20000, content: 20000, text: 8000 };
+const CHAT_KEPT = 500; // the newest messages a card keeps
+
+// The card's conversation: the user and its agent, oldest first. A question is the agent asking,
+// a result the agent's answer; the rest is talk.
+function addChat(card, from, text, kind) {
+  const message = { id: randomUUID(), from, text, at: now(), ...(kind ? { kind } : {}),
+    ...(from === 'agent' && card.agent?.name ? { name: card.agent.name } : {}) };
+  card.chat = [...(card.chat || []), message].slice(-CHAT_KEPT);
+  return message;
+}
 const agentTokenHash = (token) => createHash('sha256').update(`driftboard-agent:${token}`).digest('hex');
 const columnOf = (ws, card) => ws.binders.find((b) => b.id === card.binderId)?.title || null;
 
@@ -440,6 +450,7 @@ agentApi.patch('/cards/:id', (req, res) => {   // {progress?, result?}
     if (req.body?.[field] === undefined) continue;
     const value = agentText(req.body, field, res); if (value === null) return;
     card.agent[field] = value;
+    if (field === 'result') addChat(card, 'agent', value, 'result');
   }
   card.agent.updatedAt = now();
   card.updatedAt = now();
@@ -462,11 +473,20 @@ agentApi.post('/cards/:id/ask', (req, res) => {   // {question}: the card goes t
   const { ws, card } = found;
   card.agent.question = question;
   card.agent.askedAt = now();
+  addChat(card, 'agent', question, 'question');
   const binder = ws.binders.find((b) => b.title === 'Needs you');
   if (binder) moveCard(ws, card, binder);
   card.updatedAt = now();
   persist();
   res.json({ ok: true });
+});
+agentApi.post('/cards/:id/chat', (req, res) => {   // {text}: the agent says something to the user
+  const found = agentCard(req, res); if (!found) return;
+  const text = agentText(req.body, 'text', res); if (text === null) return;
+  const message = addChat(found.card, 'agent', text);
+  found.card.updatedAt = now();
+  persist();
+  res.status(201).json(message);
 });
 agentApi.post('/cards/:id/move', (req, res) => {   // {column}: Working, Needs you or Review
   const found = agentCard(req, res); if (!found) return;
@@ -762,6 +782,19 @@ app.post('/api/items', (req, res) => {
   ws.cards.push(card);
   persist();
   res.status(201).json({ cardId: card.id, workspaceId: ws.id, created: true });
+});
+
+// The user writes to the card's agent (from the open card, or a script on their behalf).
+app.post('/api/cards/:id/chat', (req, res) => {
+  const found = getCard(req.params.id);
+  if (!found) return res.status(404).json({ error: 'card not found' });
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+  if (!text) return res.status(400).json({ error: 'text is required' });
+  if (text.length > AGENT_LIMITS.text) return res.status(400).json({ error: `text is longer than ${AGENT_LIMITS.text} characters` });
+  const message = addChat(found.card, 'user', text);
+  found.card.updatedAt = now();
+  persist();
+  res.status(201).json(message);
 });
 
 // The helper starting an agent on a card mints its token (shown once; a new one replaces it),

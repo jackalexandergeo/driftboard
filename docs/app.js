@@ -344,6 +344,8 @@ async function reloadWorkspace() {
   if (gesturing()) { changedElsewhere = true; return; } // a drag began meanwhile: the next check draws this
   ws = fresh;
   renderWorkspace();
+  const open = currentCardId && currentCard();
+  if (open) { renderAgent(open); renderChat(open); }   // the open card's chat, live
 }
 
 function renderTabs() {
@@ -856,7 +858,7 @@ function showCard(card) {
   titleInput.value = card.title;
   fitTitle();
   showCardMeta(card);
-  renderAgent(card); renderDescription(); renderAttachments(); updateSortBtn();
+  renderAgent(card); renderChat(card); renderDescription(); renderAttachments(); updateSortBtn();
 }
 // What the card's agent reported: its own section, apart from the description, which stays yours.
 function renderAgent(card) {
@@ -865,11 +867,69 @@ function renderAgent(card) {
   if (!agent) return;
   const state = agent.stoppedAt ? `stopped ${shortDate(agent.stoppedAt)}` : `since ${shortDate(agent.startedAt)}`;
   $('agent-head').textContent = `Agent: ${agent.name || 'agent'} · ${state}`;
-  $('agent-question').classList.toggle('hidden', !agent.question);
-  $('agent-question').textContent = agent.question ? `Needs you: ${agent.question}` : '';
-  $('agent-progress').textContent = agent.progress || '';
-  $('agent-result').innerHTML = agent.result ? renderMarkdown(agent.result) : '';
+  // The chat shows questions and results as they come; here only what a card from before chat had.
+  const said = (kind) => (card.chat || []).some((message) => message.kind === kind);
+  const question = agent.question && !said('question') ? agent.question : '';
+  $('agent-question').classList.toggle('hidden', !question);
+  $('agent-question').textContent = question ? `Needs you: ${question}` : '';
+  $('agent-progress').textContent = card.chat?.length ? '' : agent.progress || '';   // by the chat, when there is one
+  $('agent-result').innerHTML = agent.result && !said('result') ? renderMarkdown(agent.result) : '';
 }
+
+// The card's conversation with its agent, like a chat: yours on the right, the agent's on the
+// left (markdown), its questions marked. What you send here reaches the agent through the helper.
+function renderChat(card) {
+  const chat = card.chat || [];
+  const show = chat.length > 0 || !!card.agent || (card.buttons || []).some((button) => ['start', 'reply', 'context'].includes(button.id));
+  $('chat-section').classList.toggle('hidden', !show);
+  if (!show) return;
+  const thread = $('chat-thread');
+  const sameCard = thread.dataset.card === card.id;
+  const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 32;
+  thread.innerHTML = '';
+  for (const message of chat) {
+    const row = document.createElement('div');
+    row.className = `chat-msg ${message.from === 'user' ? 'user' : 'agent'}${message.kind ? ` ${message.kind}` : ''}`;
+    const meta = document.createElement('div');
+    meta.className = 'chat-meta';
+    const who = message.from === 'user' ? 'You' : (message.name || 'agent');
+    const what = message.kind === 'question' ? ' asks' : message.kind === 'result' ? ' · result' : '';
+    meta.textContent = `${who}${what} · ${shortDate(message.at)}`;
+    const body = document.createElement('div');
+    if (message.from === 'user') { body.className = 'chat-body plain'; body.textContent = message.text; }
+    else { body.className = 'chat-body markdown'; body.innerHTML = renderMarkdown(message.text); }
+    row.append(meta, body);
+    thread.append(row);
+  }
+  if (!chat.length) {
+    const empty = document.createElement('div');
+    empty.className = 'chat-status';
+    empty.textContent = card.agent ? 'Nothing said yet.' : 'Anything you write here goes to the agent when it starts.';
+    thread.append(empty);
+  }
+  const working = card.agent && !card.agent.stoppedAt && card.agent.progress;
+  $('chat-status').textContent = working ? `🤖 ${card.agent.progress}` : '';
+  if (!sameCard || atBottom) thread.scrollTop = thread.scrollHeight;
+  thread.dataset.card = card.id;
+}
+async function sendChat() {
+  const card = currentCard();
+  const input = $('chat-input');
+  const text = input.value.trim();
+  if (!card || !text) return;
+  $('chat-send').disabled = true;
+  try {
+    const message = await api('POST', `/api/cards/${card.id}/chat`, { text });
+    card.chat = [...(card.chat || []), message];
+    input.value = '';
+    renderChat(card);
+  } catch (err) { toast(err.message); }
+  finally { $('chat-send').disabled = false; input.focus(); }
+}
+$('chat-send').addEventListener('click', sendChat);
+$('chat-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); }
+});
 function showCardMeta(card) {
   $('card-meta').textContent = `Created ${shortDate(card.createdAt)} · Updated ${shortDate(card.updatedAt)}`;
 }
@@ -1325,7 +1385,7 @@ function busy() {
   const focused = document.activeElement;
   return gesturing() || pendingWrites > 0 || uploading > 0
     || !!openMenuEl || currentBinderId !== null || descEditing || editingAtts.size > 0
-    || (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA'));
+    || (focused && focused.id !== 'chat-input' && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA'));
 }
 // The same data gives the same text, whatever order its keys were set in.
 function stableJSON(value) {
