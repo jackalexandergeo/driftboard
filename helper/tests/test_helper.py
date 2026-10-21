@@ -327,6 +327,14 @@ class HelperTest(unittest.TestCase):
         self.helper.passOnce()
         self.assertEqual(self.buttons(cardId), [])
 
+    def testTheStarterBoardsCompletedColumnIsClosedToo(self):
+        self.config["board"]["workspaces"] = ["My Board"]
+        self.helper = self.newHelper()
+        cardId = self.board.call("POST", "/api/items", {"source": "test", "title": "Finished", "workspace": "My Board",
+                                                        "column": "Completed"})["cardId"]
+        self.helper.passOnce()
+        self.assertEqual(self.buttons(cardId), [])
+
     def testStartsBeyondTheLimitWaitTheirTurn(self):
         self.helper = self.newHelper(maxAgents=1)
         first, second = self.item("First"), self.item("Second")
