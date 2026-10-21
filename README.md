@@ -101,6 +101,10 @@ for your personal use. Instead, [Run it locally](#-run-it-locally).
 
 ## 💻 Run it locally
 
+Setting it up with an AI assistant? Hand it [BOOTSTRAP.md](BOOTSTRAP.md) and say "set this
+up for me": it checks what is needed, asks a few questions, installs the board and the agent
+helper, and tests them with a first card.
+
 Running locally gives you the **full app with a small Node server** that saves your
 board as real files on disk (great for backups) instead of in the browser.
 
