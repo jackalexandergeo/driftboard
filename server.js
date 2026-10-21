@@ -977,6 +977,9 @@ app.patch('/api/cards/:id', (req, res) => {
   if (req.body.pressed !== undefined && req.body.pressed !== null) {
     return res.status(400).json({ error: 'pressed can only be cleared (null); press a button with POST /press' });
   }
+  if (req.body.pressedAt !== undefined && (req.body.pressed !== null || typeof req.body.pressedAt !== 'string')) {
+    return res.status(400).json({ error: 'pressedAt goes with pressed: null: the `at` of the press the script handled' });
+  }
   const { card } = found;
   if (typeof req.body.title === 'string') card.title = req.body.title;
   if (typeof req.body.description === 'string') card.description = req.body.description;
@@ -989,7 +992,9 @@ app.patch('/api/cards/:id', (req, res) => {
       }));
     } else delete card.buttons;
   }
-  if (req.body.pressed === null) delete card.pressed;
+  // A script clears the press it handled, named by its `at`: a newer press, made while it was busy,
+  // stays for its next look. Without pressedAt (older scripts) any press is cleared.
+  if (req.body.pressed === null && (req.body.pressedAt === undefined || card.pressed?.at === req.body.pressedAt)) delete card.pressed;
   card.updatedAt = now();
   persist();
   res.json(card);

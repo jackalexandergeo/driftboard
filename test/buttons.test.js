@@ -27,3 +27,19 @@ test('a button that asks for text records the text with the press', async () => 
   const plain = await call(board, 'POST', `/api/cards/${cardId}/press`, { button: 'start', text: 'ignored' }, board.token);
   assert.equal(plain.body.pressed.text, undefined);   // a plain button takes no text
 });
+
+test('a script clears only the press it handled; a newer one waits for it', async () => {
+  const { cardId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Two presses' }, board.token)).body;
+  const buttons = [{ id: 'start', label: '▶ Start' }, { id: 'context', label: '＋ Context', input: 'Context?' }];
+  await call(board, 'PATCH', `/api/cards/${cardId}`, { buttons }, board.token);
+  const handled = (await call(board, 'POST', `/api/cards/${cardId}/press`, { button: 'start' }, board.token)).body.pressed;
+  await new Promise((resolve) => setTimeout(resolve, 5));   // a later press has a later `at`
+  await call(board, 'POST', `/api/cards/${cardId}/press`, { button: 'context', text: 'made while the script was busy' }, board.token);
+  const kept = await call(board, 'PATCH', `/api/cards/${cardId}`, { pressed: null, pressedAt: handled.at }, board.token);
+  assert.deepEqual([kept.status, kept.body.pressed.button], [200, 'context']);
+  const cleared = await call(board, 'PATCH', `/api/cards/${cardId}`, { pressed: null, pressedAt: kept.body.pressed.at }, board.token);
+  assert.equal(cleared.body.pressed, undefined);
+  await call(board, 'POST', `/api/cards/${cardId}/press`, { button: 'start' }, board.token);
+  assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { pressed: null }, board.token)).body.pressed, undefined);   // as before
+  assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { pressedAt: 'x' }, board.token)).status, 400);
+});
