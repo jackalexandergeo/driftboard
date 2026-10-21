@@ -66,7 +66,8 @@ class BoardClient:
         """A call with the board's token, or, for an agent call, with a card's own token."""
         token = self.token()
         self._proven(token)
-        data = json.dumps(body).encode() if body is not None else None
+        # UTF-8, not \uXXXX escapes (6 bytes each), so non-Latin text fits the board's body limit
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
         request = urllib.request.Request(self.url + path, data=data, method=method)
         request.add_header("Authorization", "Bearer %s" % (cardToken or token))
         if data is not None:

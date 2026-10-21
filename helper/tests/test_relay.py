@@ -29,6 +29,13 @@ class RelayTest(unittest.TestCase):
     def tearDown(self):
         self.directory.cleanup()
 
+    def testANonLatinNoteFitsTheBoardsLimit(self):
+        # Escaped as \uXXXX, 12000 characters of Japanese were over 64 KB, and the board refused the note.
+        note = "こんにちは" * 2400
+        self.client.request("POST", "/api/agent/cards/%s/notes" % self.cardId, {"content": note}, cardToken=self.cardToken)
+        notes = [attachment["content"] for attachment in self.board.call("GET", "/api/cards/%s" % self.cardId)["card"]["attachments"]]
+        self.assertIn(note, notes)
+
     def testReportsReachTheCardOnceAndInOrder(self):
         relay = Relay(self.client, self.cardId, self.cardToken, self.outbox)
         append(self.outbox, {"kind": "progress", "text": "reading 12 invoices"})
