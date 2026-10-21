@@ -286,6 +286,12 @@ class HelperTest(unittest.TestCase):
                 "PATCH", "/api/agent/cards/%s" % cardId, {"progress": "x"}, cardToken=token)
         self.assertEqual(refused.exception.status, 401)
 
+    def testACardAlreadyClosedOffersNoAgent(self):
+        # Live: cards posted straight into Won't do got ▶ Start.
+        cardId = self.board.call("POST", "/api/items", {"source": "test", "title": "Out of scope", "column": "Won't do"})["cardId"]
+        self.helper.passOnce()
+        self.assertEqual(self.buttons(cardId), [])
+
     def testStartsBeyondTheLimitWaitTheirTurn(self):
         self.helper = self.newHelper(maxAgents=1)
         first, second = self.item("First"), self.item("Second")

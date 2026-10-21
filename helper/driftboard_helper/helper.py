@@ -50,9 +50,9 @@ ACTIVE = ("working", "idle")
 LISTING_GRACE_SECONDS = 30
 
 
-def buttonsFor(run):
+def buttonsFor(run, column=None):
     state = (run or {}).get("state", "waiting")
-    if state == "closed":
+    if state == "closed" or column in CLOSED_COLUMNS:   # a card in Done or Won't do offers no agent
         return []
     if state == "working":
         return [STOP, CONTEXT]
@@ -111,14 +111,15 @@ class Helper:
             workspace = self.board.request("GET", "/api/workspaces/%s" % summary["id"])
             columns = {binder["id"]: binder["title"] for binder in workspace.get("binders") or []}
             for card in workspace.get("cards") or []:
+                column = columns.get(card.get("binderId"))
                 try:
-                    self._card(card, columns.get(card.get("binderId")))
-                    cards.append(card)
+                    self._card(card, column)
+                    cards.append((card, column))
                 except (BoardError, LaunchError) as error:
                     logger.warning("card %s: %s", card.get("id"), error)
         self._watch()
-        for card in cards:
-            wantedButtons = buttonsFor(self.state["runs"].get(card["id"]))
+        for card, column in cards:
+            wantedButtons = buttonsFor(self.state["runs"].get(card["id"]), column)
             if (card.get("buttons") or []) != wantedButtons:
                 try:
                     self.board.request("PATCH", "/api/cards/%s" % card["id"], {"buttons": wantedButtons})
