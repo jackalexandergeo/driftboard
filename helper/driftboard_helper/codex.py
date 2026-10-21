@@ -151,6 +151,19 @@ class CodexLauncher:
             json.dump(threads, registry)
         os.replace(self.registry + ".new", self.registry)
 
+    def attachCommand(self, run):
+        """(argv, why not): Codex's own interactive view of the run's thread, in the same sandbox.
+        Only between turns: a turn in flight is a `codex exec` of its own."""
+        thread = run.get("session")
+        known = self._threads().get(thread) if thread else None
+        if not known or run.get("state") == "closed":
+            return None, "the agent has no Codex thread yet"
+        if self._alive(known["pid"]):
+            return None, "Codex is in the middle of a turn: open it once the card says the turn is over"
+        runFolder = known["environment"].get("DRIFTBOARD_RUN", "")
+        options = SANDBOX + ["-c", "sandbox_workspace_write.writable_roots=%s" % json.dumps([runFolder])]
+        return [self.command] + options + (["-m", self.model] if self.model else []) + ["resume", thread], None
+
     def states(self):
         """{thread id: (state, thread id)}: working while its codex process runs, done once it ended."""
         for pid, process in list(self._children.items()):

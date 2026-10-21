@@ -58,6 +58,13 @@ class ClaudeLauncher:
         status, _output, _errors = self._run(["claude", "stop", sessionId], self.directory)
         return status == 0
 
+    def attachCommand(self, run):
+        """(argv, why not): the command that opens the run's session in a terminal (it keeps
+        running when the terminal closes)."""
+        if run.get("state") not in ("working", "idle") or not run.get("session"):
+            return None, "the agent's session is not running"
+        return ["claude", "attach", run["session"]], None
+
     def states(self):
         """{short id: (state, full id)} for every session `claude agents` knows, or None."""
         status, output, _errors = self._run(["claude", "agents", "--json", "--all"], self.directory)

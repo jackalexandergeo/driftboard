@@ -5,12 +5,13 @@ import subprocess
 import tempfile
 import threading
 import unittest
+import unittest.mock
 import urllib.error
 
 from driftboard_helper.board import BoardClient, BoardError
 from driftboard_helper.claude import ClaudeLauncher
 from driftboard_helper.config import DEFAULTS
-from driftboard_helper.helper import CONTEXT, REPLY, RESUME, START, STOP, Helper, passSafely
+from driftboard_helper.helper import CONTEXT, REPLY, RESUME, START, STOP, TERMINAL, Helper, passSafely
 
 from .boards import NODE, Board
 
@@ -131,13 +132,13 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(self.buttons(cardId), [START["id"], CONTEXT["id"]])
         self.press(cardId, "start")
         self.helper.passOnce()
-        self.assertEqual(self.buttons(cardId), [STOP["id"], CONTEXT["id"]])
+        self.assertEqual(self.buttons(cardId), [STOP["id"], CONTEXT["id"], TERMINAL["id"]])
         self.claude.wait()
         self.now += 31
         self.helper.passOnce()
         card = self.card(cardId)
         self.assertEqual((self.board.column(cardId), card["agent"]["question"]), ("Needs you", "The 2025 or the 2026 ledger?"))
-        self.assertEqual(self.buttons(cardId), [REPLY["id"], CONTEXT["id"], STOP["id"]])
+        self.assertEqual(self.buttons(cardId), [REPLY["id"], CONTEXT["id"], TERMINAL["id"], STOP["id"]])
         self.press(cardId, "reply", "The 2026 ledger.")
         self.settle()
         session = next(iter(self.claude.sessions.values()))
@@ -238,7 +239,7 @@ class HelperTest(unittest.TestCase):
         self.helper.passOnce()
         session = next(iter(self.claude.sessions.values()))
         self.assertEqual(session["messages"], ["The user pressed Resume: carry on where you left off."])
-        self.assertEqual(self.buttons(cardId), [STOP["id"], CONTEXT["id"]])
+        self.assertEqual(self.buttons(cardId), [STOP["id"], CONTEXT["id"], TERMINAL["id"]])
 
     def testContextWhileItWorksWaitsForTheEndOfItsTurn(self):
         cardId = self.item("Busy")
@@ -350,7 +351,37 @@ class HelperTest(unittest.TestCase):
         cardId = self.item("Chat with me")
         sent = self.recordRequests()
         self.helper.passOnce()
-        self.assertIn(("PATCH", "/api/cards/%s" % cardId, {"buttons": [START, CONTEXT], "chatEnabled": True}), sent)
+        self.assertIn(("PATCH", "/api/cards/%s" % cardId, {"buttons": [START, CONTEXT], "terminalEnabled": False,
+                                                          "chatEnabled": True}), sent)
+
+    def testAnAgentsSessionOpensInATerminalWindowFromTheOpenCard(self):
+        # The user: "make it so it can open a terminal page with claude for you".
+        cardId = self.item("Show me the session")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.settle()
+        session = self.helper.state["runs"][cardId]["session"]
+        self.assertIn(TERMINAL["id"], self.buttons(cardId))
+        self.assertEqual([button.get("place") for button in self.card(cardId)["buttons"] if button["id"] == "terminal"], ["open"])
+        opened = []
+        with unittest.mock.patch("driftboard_helper.helper.openWindow",
+                                 lambda argv, cwd, app=None: opened.append((argv, cwd, app)) or (True, "terminator")):
+            self.press(cardId, "terminal")
+            self.helper.passOnce()
+        self.assertEqual(opened, [(["claude", "attach", session], self.project, "")])
+        self.assertNotIn("pressed", self.card(cardId))
+
+    def testAWindowThatCannotOpenSaysOnTheCardWhatToRun(self):
+        cardId = self.item("No terminal app")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.settle()
+        session = self.helper.state["runs"][cardId]["session"]
+        with unittest.mock.patch("driftboard_helper.helper.openWindow", lambda argv, cwd, app=None: (False, "no terminal app found")):
+            self.press(cardId, "terminal")
+            self.helper.passOnce()
+        notes = [attachment.get("content") or "" for attachment in self.card(cardId)["attachments"]]
+        self.assertTrue(any("no terminal app found" in note and "claude attach %s" % session in note for note in notes), notes)
 
     def testAPressIsClearedOnlyAsThePressItWas(self):
         # A press made while the helper worked on the one before must not be wiped with it.

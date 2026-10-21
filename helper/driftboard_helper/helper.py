@@ -22,6 +22,7 @@ from .claude import TURN_OVER, ClaudeLauncher, LaunchError
 from .config import configProblems, loadConfig, stateDirectory
 from .guard import writeGuards
 from .outbox import append
+from .terminal import SOCKET_NAME, TerminalServer, boardTerminals, openWindow
 from .relay import Relay
 from .rules import claudePermissions, guidanceFor, limitsOf, rulesFor, unguarded
 
@@ -43,7 +44,9 @@ REPLY = {"id": "reply", "label": "↩ Reply", "title": "Answer the agent, or sen
          "input": "Your answer, or what to change"}
 CONTEXT = {"id": "context", "label": "＋ Context", "title": "Tell the agent something it should know",
            "input": "What should the agent know? For example what was said in person"}
-OWN_BUTTONS = {button["id"] for button in (START, STOP, RESUME, REPLY, CONTEXT)}
+TERMINAL = {"id": "terminal", "label": "↗ Open in a window", "place": "open",   # in the open card, not on its face
+            "title": "Open the agent's session in a terminal window on this computer"}
+OWN_BUTTONS = {button["id"] for button in (START, STOP, RESUME, REPLY, CONTEXT, TERMINAL)}
 
 # run states: waiting (context only, not started), working, idle (its turn ended), stopped, closed
 ACTIVE = ("working", "idle")
@@ -53,14 +56,15 @@ LISTING_GRACE_SECONDS = 30
 CLOSED_KEPT_SECONDS = 7 * 86400   # a closed run (its folders, its registry entry) is forgotten after this
 
 
-def buttonsFor(run, column=None):
+def buttonsFor(run, column=None, terminal=False):
+    """terminal: the agent's session can be opened in a terminal now."""
     state = (run or {}).get("state", "waiting")
     if state == "closed" or column in CLOSED_COLUMNS:   # a card in Done or Won't do offers no agent
         return []
     if state == "working":
-        return [STOP, CONTEXT]
+        return [STOP, CONTEXT] + ([TERMINAL] if terminal else [])
     if state == "idle":
-        return [REPLY, CONTEXT, STOP]
+        return [REPLY, CONTEXT] + ([TERMINAL] if terminal else []) + [STOP]
     if state == "stopped":
         return [RESUME, REPLY, CONTEXT]
     return [START, CONTEXT]
@@ -106,6 +110,8 @@ class Helper:
             self.state = {"runs": {}}
         self._saved = json.dumps(self.state, indent=1)
         self._relays = {}
+        self.terminals = None   # the board's terminals (a TerminalServer), when there are any
+        self.terminalsOpen = set()   # cards whose session has a terminal open on the board
 
     # ---- one pass ------------------------------------------------------------
 
@@ -136,10 +142,15 @@ class Helper:
         self._prune()
         self._watch()
         for card, column in cards:
-            wantedButtons = buttonsFor(self.state["runs"].get(card["id"]), column)
-            if (card.get("buttons") or []) != wantedButtons:
+            run = self.state["runs"].get(card["id"])
+            attachable = bool(run) and self.launcher.attachCommand(run)[0] is not None
+            wantedButtons = buttonsFor(run, column, terminal=attachable)
+            # terminalEnabled: the board offers the session in the page, through the helper's socket
+            wantedTerminal = attachable and self.terminals is not None and column not in CLOSED_COLUMNS
+            if (card.get("buttons") or []) != wantedButtons or bool(card.get("terminalEnabled")) != wantedTerminal:
                 # chatEnabled: the board shows the card's chat box (what the user writes there reaches the agent)
-                change = dict({"buttons": wantedButtons}, **({"chatEnabled": True} if wantedButtons else {}))
+                change = dict({"buttons": wantedButtons, "terminalEnabled": wantedTerminal},
+                              **({"chatEnabled": True} if wantedButtons else {}))
                 try:
                     self.board.request("PATCH", "/api/cards/%s" % card["id"], change)
                 except BoardError as error:
@@ -233,6 +244,8 @@ class Helper:
             if not self._slotFree():
                 return False
             self._wake(card["id"], run, "The user pressed Resume: carry on where you left off.")
+        elif button == "terminal" and run:
+            self._openTerminal(card["id"], run)
         elif button in ("reply", "context") and not text:
             logger.warning("card %s: %s pressed without text (is the board older than the helper?)", card["id"], button)
         elif button in ("reply", "context"):
@@ -243,6 +256,31 @@ class Helper:
             self._handled(card, pressed)
             self._deliver(card["id"], text, "The user replied" if button == "reply" else "The user added context")
         return True
+
+    def _openTerminal(self, cardId, run):
+        """↗ Terminal: the agent's session in a window of the user's terminal app."""
+        argv, why = self.launcher.attachCommand(run)
+        if not argv:
+            self._note(cardId, "⚠ No terminal for this agent now: %s." % why)
+            return
+        opened, detail = openWindow(argv, self.launcher.directory, app=self.config.get("terminal", {}).get("app"))
+        if opened:
+            logger.info("card %s: opened %s in %s", cardId, shlex.join(argv), detail)
+        else:
+            self._note(cardId, "⚠ Could not open a terminal: %s. Run it in yours: `%s`" % (detail, shlex.join(argv)))
+            logger.warning("card %s: could not open a terminal: %s", cardId, detail)
+
+    def commandFor(self, cardId):
+        """For the board's terminals: (argv, folder) of the card's session, or (None, why not)."""
+        run = self.state["runs"].get(cardId)
+        if not run:
+            return None, "this card has no agent"
+        argv, why = self.launcher.attachCommand(run)
+        return (argv, self.launcher.directory) if argv else (None, why)
+
+    def _terminalHoldsTurns(self, cardId):
+        """Codex in a terminal is a turn of its own: the chat waits for the terminal to close."""
+        return self.launcher.tool == "codex" and cardId in self.terminalsOpen
 
     def _seen(self, cardId):
         run = self.state["runs"].setdefault(cardId, {"state": "waiting", "contexts": []})
@@ -411,7 +449,7 @@ class Helper:
 
     def _tell(self, cardId, run, message):
         """Wake the agent with a message, or keep it for when its turn ends (or the wake works)."""
-        if run.get("state") == "working" or not self._slotFree():
+        if run.get("state") == "working" or not self._slotFree() or self._terminalHoldsTurns(cardId):
             run.setdefault("queued", []).append(message)
             return
         try:
@@ -476,7 +514,8 @@ class Helper:
                 logger.exception("card %s: unexpected error while watching its agent", cardId)
         # then the messages kept for later, now that every run's state (and so every slot) is known
         for cardId, run in self.state["runs"].items():
-            if run.get("state") in ("idle", "stopped") and run.get("queued") and self._slotFree():
+            if (run.get("state") in ("idle", "stopped") and run.get("queued") and self._slotFree()
+                    and not self._terminalHoldsTurns(cardId)):
                 message = "\n\n".join(run.pop("queued"))
                 try:
                     self._wake(cardId, run, message)
@@ -537,7 +576,14 @@ def build(config):
                                  model=config["agent"].get("model") or None)
     else:
         launcher = ClaudeLauncher(directory)
-    return Helper(config, board, launcher, stateDirectory())
+    helper = Helper(config, board, launcher, stateDirectory())
+    if config.get("terminal", {}).get("board", True) and boardTerminals():
+        try:
+            helper.terminals = TerminalServer(os.path.join(stateDirectory(), SOCKET_NAME), helper.commandFor,
+                                              opened=helper.terminalsOpen.add, closed=helper.terminalsOpen.discard).start()
+        except OSError as error:
+            logger.warning("no terminals on the board: %s", error)
+    return helper
 
 
 def passSafely(helper):

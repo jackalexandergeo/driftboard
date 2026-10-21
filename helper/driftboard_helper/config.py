@@ -32,6 +32,9 @@ DEFAULTS = {
     "board": {"url": "http://127.0.0.1:4321", "tokenFile": "~/.local/share/driftboard/token", "workspaces": ["Inbox"]},
     "agent": {"tool": "claude", "directory": "", "model": "", "maxAgents": 1, "gitHosts": [], "rules": [],
               "denyCommands": [], "access": {}, "limits": {}},
+    # app: the terminal ↗ Terminal opens ("terminator", or ["kitty", "--hold", "{command}"]); empty: the
+    # system's default. board: the terminal in the board page (Linux and macOS).
+    "terminal": {"app": "", "board": True},
     "intervalSeconds": 3,
 }
 
@@ -103,6 +106,16 @@ def configProblems(config):
             if kind not in DEFAULT_LIMITS or level not in LIMIT_LEVELS:
                 problems.append("agent.limits: %s = %r: kinds are %s; each %s"
                                 % (kind, level, ", ".join(DEFAULT_LIMITS), ", ".join(LIMIT_LEVELS)))
+    terminal = config.get("terminal")
+    if not isinstance(terminal, dict):
+        problems.append("terminal must be a table")
+    else:
+        app = terminal.get("app", "")
+        if not (isinstance(app, str) or (isinstance(app, list) and app and all(isinstance(word, str) for word in app)
+                                         and "{command}" in app)):
+            problems.append('terminal.app is an app\'s name ("terminator") or a command with "{command}" in it')
+        if not isinstance(terminal.get("board", True), bool):
+            problems.append("terminal.board must be true or false")
     if not isinstance(board.get("workspaces"), list) or not board["workspaces"]:
         problems.append("board.workspaces must name at least one board")
     interval = config.get("intervalSeconds")
