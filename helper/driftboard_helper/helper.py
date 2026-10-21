@@ -16,7 +16,7 @@ import sys
 import time
 
 from .board import BoardClient, BoardError
-from .claude import ENDED, ClaudeLauncher, LaunchError
+from .claude import TURN_OVER, ClaudeLauncher, LaunchError
 from .config import configProblems, loadConfig, stateDirectory
 from .guard import writeGuards
 from .outbox import append
@@ -294,7 +294,7 @@ class Helper:
                 run["seenWorking"] = True
             settled = (run.get("seenWorking") or not getattr(self.launcher, "listingsLag", False)
                        or self._clock() - run.get("turnAt", 0) > self.listingGrace)
-            if run["state"] == "working" and listed and listed[0] in ENDED and settled:
+            if run["state"] == "working" and listed and listed[0] in TURN_OVER and settled:
                 run["state"] = "idle"   # its turn is over: it asked, finished, or stopped by itself
             if run["state"] == "idle" and run.get("queued"):
                 message = "\n\n".join(run.pop("queued"))

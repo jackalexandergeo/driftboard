@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 
 SPAWNED = re.compile(r"backgrounded\s+·\s+([0-9a-f]{6,})\s+·")
 ENDED = ("done", "stopped", "failed")
+# A turn is over when it ended, or is blocked on the user: a session that ends its turn on a
+# question lists as blocked, and so does one waiting for their yes on a command.
+TURN_OVER = ENDED + ("blocked",)
 TIMED_OUT = -1
 
 

@@ -178,6 +178,23 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(chat, [("user", "Use the 2026 ledger."), ("agent", "Starting on the ledger."),
                                 ("user", "How many mismatches?"), ("agent", "Done: 2 mismatches.")])
 
+    def testAChatMessageReachesAnAgentBlockedOnItsQuestion(self):
+        # Live: the agent ended its turn on a question, `claude agents` listed it as blocked, and the
+        # user's chat message waited for a turn end that, by the helper's count, never came.
+        cardId = self.item("Blocked")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        session = next(iter(self.claude.sessions.values()))
+        session["state"] = "blocked"
+        self.now += 31
+        self.helper.passOnce()
+        self.assertEqual(self.helper.state["runs"][cardId]["state"], "idle")
+        self.board.call("POST", "/api/cards/%s/chat" % cardId, {"text": "hello, we are testing you"})
+        self.helper.passOnce()
+        self.assertEqual(session["messages"], ["The user says: hello, we are testing you"])
+
     def testContextWhileItWorksWaitsForTheEndOfItsTurn(self):
         cardId = self.item("Busy")
         self.helper.passOnce()
