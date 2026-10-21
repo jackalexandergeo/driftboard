@@ -6,6 +6,8 @@ agent's first prompt. None of them is a sandbox; together they are the floor.
 Other machines are the user's call, per command ([agent.access]): "deny" (default), "ask"
 (Claude waits for the user's yes on every use) or "allow"."""
 
+import re
+
 # Chat, mail and calendars are other people's: nothing is ever sent from the user's accounts.
 CHAT_TOOLS = ["mcp__claude_ai_Microsoft_365__teams_send_chat_message", "mcp__claude_ai_Microsoft_365__teams_send_channel_message",
               "mcp__claude_ai_Microsoft_365__teams_reply_channel_message", "mcp__claude_ai_Microsoft_365__teams_create_chat",
@@ -40,10 +42,19 @@ FORGE_WRITE_COMMANDS = {
 API_WRITE_FLAGS = ("-X*", "--method*", "-f *", "-F *", "--field*", "--raw-field*", "--input*", "mutation*")
 PUSHES = ["Bash(git *push*)", "Bash(git *send-pack*)"]
 
-# Commands that reach other machines, opened per command by the user.
+# Commands that reach other machines: denied unless the user opens them, one by one. The user may
+# name any other command too (a site's own CLI, say): it is then denied, asked or allowed likewise.
 ACCESS_COMMANDS = {"ssh": ["Bash(ssh *)"], "scp": ["Bash(scp *)"], "sftp": ["Bash(sftp *)"], "sshfs": ["Bash(sshfs *)"],
                    "rsync": ["Bash(rsync *:*)"]}
 ACCESS_LEVELS = ("deny", "ask", "allow")
+COMMAND_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
+
+
+def accessCommands(access):
+    """{command: its permission patterns}: the built-in ones, and any other the user named."""
+    named = {command: ["Bash(%s *)" % command, "Bash(%s)" % command] for command in (access or {})
+             if command not in ACCESS_COMMANDS}
+    return {**ACCESS_COMMANDS, **named}
 
 HARD_RULES = [
     "Never post, send, reply to, edit, delete, react to or schedule anything in chat, mail or calendars (Slack, "
@@ -73,18 +84,19 @@ def accessOf(access, command):
 
 def opened(access):
     """Commands the user opened ("ask" or "allow"): no stand-in in their way."""
-    return [command for command in ACCESS_COMMANDS if accessOf(access, command) != "deny"]
+    return [command for command in accessCommands(access) if accessOf(access, command) != "deny"]
 
 
 def accessPermissions(access):
     rules = {level: [] for level in ACCESS_LEVELS}
-    for command, patterns in ACCESS_COMMANDS.items():
+    for command, patterns in accessCommands(access).items():
         rules[accessOf(access, command)] += patterns
     return rules
 
 
 def accessRules(access):
-    named = {level: [command for command in ACCESS_COMMANDS if accessOf(access, command) == level] for level in ACCESS_LEVELS}
+    named = {level: [command for command in accessCommands(access) if accessOf(access, command) == level]
+             for level in ACCESS_LEVELS}
     rules = []
     if named["deny"]:
         rules.append("Never run %s, and never reach another machine another way (a script, a tunnel, another tool). If the "

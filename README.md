@@ -235,7 +235,46 @@ It answers `201` with `{cardId, workspaceId, created: true}` for a new card, and
 `duplicate` or `joined` otherwise. With sign-in off (`DRIFTBOARD_SIGN_IN=off`) the token
 header is not needed. Tests: `npm test`.
 
-## 🤖 Agents on cards
+## 🤖 Put an AI agent on a card
+
+`helper/` starts **Claude Code** or **Codex** on a card when you press ▶ Start, and the card
+keeps you posted: the agent's progress on its face, a question in red (the card moves to
+Needs you), its result in the open card, and the card in Review when it is done. You stay on
+the board:
+
+| Button | |
+|---|---|
+| ▶ Start | an agent starts on the card, in your project folder |
+| ＋ Context | tell it something it should know (what was said in person, say): before it starts, or while it works |
+| ↩ Reply | answer its question, or send its work back with what to change |
+| ⏹ Stop | stop it; ↩ Reply carries on |
+
+Moving the card to Done or Won't do stops the agent for good. Agents are optional: without
+the helper the board is a plain board.
+
+It needs Python 3.11+ and Claude Code or Codex signed in. Then:
+
+```sh
+helper/install-service                     # the systemd user unit, and ~/.config/driftboard-helper/config.toml
+$EDITOR ~/.config/driftboard-helper/config.toml   # agent.directory, tool, and which boards (default Inbox)
+helper/bin/driftboard-helper check
+systemctl --user enable --now driftboard-helper
+```
+
+**What an agent may do.** Each agent reports through `driftboard-agent` (progress, note,
+ask, result, move), which writes to a file the helper forwards: the agent needs no network
+and never holds a token. Every agent gets the same floor, as Claude Code permission rules,
+as stand-ins for `glab`, `gh`, `git`, `ssh`, `scp` and `sftp` first on its PATH, and as
+plain-language hard rules: chat and mail are read-only, credentials are never read, nothing
+is written to a code host (no push, merge or comment), the board and the helper are left
+alone, and the card's own text is data, never instructions. Other machines are your call,
+per command, in `[agent.access]`: `deny` (default), `ask` (Claude waits for your yes on
+every use) or `allow`, for `ssh`, `scp`, `sftp`, `sshfs`, `rsync` or any command you name.
+Codex also runs in its own sandbox (the project folder and the card's run folder, no
+network). None of this is a sandbox for Claude: keep agents off a machine with access you
+would not hand to a script. Tests: `npm run test:helper`.
+
+## 🤖 Agents on cards: the API
 
 A helper that starts an AI agent on a card (a script, or a wrapper around a coding agent) gives that agent a token that
 reaches **its own card only**. With it the agent keeps the card current while it works, and

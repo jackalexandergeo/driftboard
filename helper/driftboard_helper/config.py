@@ -22,7 +22,7 @@ import copy
 import os
 import tomllib
 
-from .rules import ACCESS_COMMANDS, ACCESS_LEVELS
+from .rules import ACCESS_LEVELS, COMMAND_NAME
 
 TOOLS = ("claude", "codex")
 DEFAULTS = {
@@ -88,9 +88,8 @@ def configProblems(config):
         problems.append("agent.access must be a table")
     else:
         for command, level in access.items():
-            if command not in ACCESS_COMMANDS or level not in ACCESS_LEVELS:
-                problems.append("agent.access: %s = %r: commands are %s; each %s"
-                                % (command, level, ", ".join(ACCESS_COMMANDS), ", ".join(ACCESS_LEVELS)))
+            if not COMMAND_NAME.fullmatch(command) or level not in ACCESS_LEVELS:
+                problems.append("agent.access: %s = %r: a command name, each %s" % (command, level, ", ".join(ACCESS_LEVELS)))
             elif level == "ask" and agent.get("tool") != "claude":
                 problems.append('agent.access: %s = "ask" needs Claude Code: Codex cannot stop and ask you' % command)
     if not isinstance(board.get("workspaces"), list) or not board["workspaces"]:
