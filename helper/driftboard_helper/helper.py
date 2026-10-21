@@ -636,6 +636,7 @@ class Helper:
     def _halt(self, cardId, run, why):
         self.launcher.stop(run["session"])
         run["state"] = "stopped"
+        append(run["outbox"], {"kind": "move", "column": "Needs you"})   # it waits on the user now
         self._note(cardId, why)
         logger.warning("card %s: %s", cardId, why)
 

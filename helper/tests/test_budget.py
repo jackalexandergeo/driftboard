@@ -219,6 +219,8 @@ class BudgetTest(unittest.TestCase):
         self.assertIn("⏸ Stopped: this card's agent used 6% of the 5-hour Claude limit (card budget 5%). ▶ Resume or "
                       "a reply allows it 5% more.", self.notes(cardId))
         self.assertIn(["claude", "stop", "b0000000"], self.claude.calls)
+        helper.passOnce()   # the move reaches the board with the next pass's relay
+        self.assertEqual(self.board.column(cardId), "Needs you")
         self.press(cardId, "resume")
         helper.passOnce()
         self.assertEqual(helper.state["runs"][cardId]["state"], "working")   # 6% of the 11% it may now use
