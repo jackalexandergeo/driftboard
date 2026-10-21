@@ -65,6 +65,15 @@ test('a later item in the same thread joins its card as a note', async () => {
   assert.equal(elsewhere.body.created, true);   // threads belong to their source
 });
 
+test("a later item's link is attached to the thread's card, once", async () => {
+  const first = await send(open, { source: 'ci', thread: 'nightly', title: 'Nightly failed', link: { url: 'https://ci.example/1' } });
+  for (const run of [2, 2]) {
+    await send(open, { source: 'ci', thread: 'nightly', title: `Still failing (run ${run})`, link: { url: `https://ci.example/${run}` } });
+  }
+  const links = (await card(open, first.body.cardId)).attachments.filter((a) => a.type === 'url').map((a) => a.url);
+  assert.deepEqual(links, ['https://ci.example/1', 'https://ci.example/2']);
+});
+
 test('an item names its board and column, and an unknown column is refused with the ones there are', async () => {
   const placed = await send(open, { source: 'ci', title: 'Flaky test', workspace: 'Builds', column: 'Working' });
   assert.equal(placed.status, 201);

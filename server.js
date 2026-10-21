@@ -828,6 +828,10 @@ app.post('/api/items', (req, res) => {
       if (!card) continue;
       const content = [`**${source}**: ${item.title.trim()}`, (item.body || '').trim()].filter(Boolean).join('\n\n');
       card.attachments.push({ id: randomUUID(), type: 'text', content, createdAt: now(), order: card.attachments.length });
+      if (item.link && !card.attachments.some((a) => a.type === 'url' && a.url === webURL(item.link.url))) {
+        card.attachments.push({ id: randomUUID(), type: 'url', url: webURL(item.link.url), title: (item.link.title || '').trim(),
+          createdAt: now(), order: card.attachments.length });
+      }
       remember(card);
       card.updatedAt = now();
       persist();
