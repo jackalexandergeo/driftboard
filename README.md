@@ -208,6 +208,33 @@ the token and with it the board. Put an HTTPS proxy in front of it, or keep it l
 
 ---
 
+## 📥 Work from anywhere
+
+Anything that can make an HTTP request can put work on the board: a chat watcher, a CI job, a
+mail filter, a ten-line script. One call makes a card:
+
+```sh
+curl -s http://127.0.0.1:4321/api/items -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $(cat ~/.local/share/driftboard/token)" \
+  -d '{"source": "ci", "externalId": "build-41", "title": "Nightly build failed",
+       "body": "step `test` exited 1", "link": {"url": "https://ci.example/41", "title": "Build 41"}}'
+```
+
+| Field | |
+|---|---|
+| `title` | required: the card's title |
+| `body` | markdown: the card's description |
+| `source` | required: who sent it, in lowercase (`ci`, `mail`, `chat`) |
+| `externalId` | the source's own id: the same item sent again is ignored (`duplicate`) |
+| `thread` | items from one source with the same thread are one card: a later one is added to it as a note (`joined`) |
+| `link` | `{"url", "title"}`: an http or https link attached to the card |
+| `workspace` | which board, by name (default `Inbox`); a new one gets the columns New, Working, Needs you, Review, Done, Won't do |
+| `column` | which column, by title (default the first); an unknown one is refused with the columns there are |
+
+It answers `201` with `{cardId, workspaceId, created: true}` for a new card, and `200` with
+`duplicate` or `joined` otherwise. With sign-in off (`DRIFTBOARD_SIGN_IN=off`) the token
+header is not needed. Tests: `npm test`.
+
 ## 💾 Where your stuff is saved
 
 | | Live demo (browser) | Local (`npm start`) |

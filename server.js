@@ -580,6 +580,99 @@ app.post('/api/workspaces/:id/cards', (req, res) => {
   res.status(201).json(card);
 });
 
+// ---- Items: work from anywhere (a chat watcher, CI, email, a script) ----
+// One call makes a card. A repeat of the same item is ignored, and a later item in the same
+// thread joins the card the thread started (as a note), so a back-and-forth stays one card.
+const ITEM_BINDERS = ['New', 'Working', 'Needs you', 'Review', 'Done', "Won't do"];
+const ITEM_LIMITS = { title: 200, body: 16000, source: 40, externalId: 200, thread: 200, workspace: 80, column: 80 };
+const SOURCE_NAME = /^[a-z0-9][a-z0-9._-]*$/;
+const MAX_REMEMBERED_ITEMS = 200; // per card: ids of the items it holds, for repeats
+
+function itemProblems(item) {
+  const problems = [];
+  for (const [field, limit] of Object.entries(ITEM_LIMITS)) {
+    const value = item[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'string') problems.push(`${field} must be text`);
+    else if (value.length > limit) problems.push(`${field} is longer than ${limit} characters`);
+  }
+  if (typeof item.title !== 'string' || !item.title.trim()) problems.push('title is required');
+  if (typeof item.source !== 'string' || !SOURCE_NAME.test(item.source)) {
+    problems.push('source is required: lowercase letters, digits, . _ - (who sent it, e.g. "ci")');
+  }
+  if (item.link !== undefined && item.link !== null) {
+    if (typeof item.link !== 'object' || !webURL(item.link.url)) problems.push('link.url must be an http or https address');
+    else if (item.link.title !== undefined && (typeof item.link.title !== 'string' || item.link.title.length > 200)) {
+      problems.push('link.title must be text of at most 200 characters');
+    }
+  }
+  return problems;
+}
+
+function itemWorkspace(name) {
+  const wanted = (name || 'Inbox').trim();
+  let ws = state.workspaces.find((w) => w.name === wanted);
+  if (!ws) {
+    ws = { ...starterWorkspace(wanted), binders: makeBinders(ITEM_BINDERS) };
+    state.workspaces.push(ws);
+  }
+  return ws;
+}
+
+app.post('/api/items', (req, res) => {
+  const item = req.body && typeof req.body === 'object' ? req.body : {};
+  const problems = itemProblems(item);
+  if (problems.length) return res.status(400).json({ error: 'invalid item', problems });
+  const source = item.source;
+  if (item.externalId) {
+    for (const ws of state.workspaces) {
+      const held = ws.cards.find((c) => c.source?.name === source && c.source.items?.includes(item.externalId));
+      if (held) return res.json({ cardId: held.id, workspaceId: ws.id, created: false, duplicate: true });
+    }
+  }
+  const remember = (card) => {
+    if (!item.externalId) return;
+    card.source.items = [...(card.source.items || []), item.externalId].slice(-MAX_REMEMBERED_ITEMS);
+  };
+  if (item.thread) {
+    for (const ws of state.workspaces) {
+      const card = ws.cards.find((c) => c.source?.name === source && c.source.thread === item.thread);
+      if (!card) continue;
+      const content = [`**${source}**: ${item.title.trim()}`, (item.body || '').trim()].filter(Boolean).join('\n\n');
+      card.attachments.push({ id: randomUUID(), type: 'text', content, createdAt: now(), order: card.attachments.length });
+      remember(card);
+      card.updatedAt = now();
+      persist();
+      return res.json({ cardId: card.id, workspaceId: ws.id, created: false, joined: true });
+    }
+  }
+  const ws = itemWorkspace(item.workspace);
+  const binder = (item.column && ws.binders.find((b) => b.title === item.column.trim())) || ws.binders[0] || null;
+  if (item.column && binder?.title !== item.column.trim()) {
+    return res.status(400).json({ error: `no column "${item.column}" on ${ws.name}`, columns: ws.binders.map((b) => b.title) });
+  }
+  const card = {
+    id: randomUUID(),
+    title: item.title.trim(),
+    description: (item.body || '').trim(),
+    attachments: [],
+    binderId: binder ? binder.id : null,
+    order: binder ? ws.cards.filter((c) => c.binderId === binder.id).length : 0,
+    x: 80, y: 80,
+    source: { name: source, ...(item.thread ? { thread: item.thread } : {}) },
+    createdAt: now(),
+    updatedAt: now(),
+  };
+  if (item.link) {
+    card.attachments.push({ id: randomUUID(), type: 'url', url: webURL(item.link.url), title: (item.link.title || '').trim(),
+      createdAt: now(), order: 0 });
+  }
+  remember(card);
+  ws.cards.push(card);
+  persist();
+  res.status(201).json({ cardId: card.id, workspaceId: ws.id, created: true });
+});
+
 // Which board a card is on, for a link straight to it.
 app.get('/api/cards/:id', (req, res) => {
   const found = getCard(req.params.id);

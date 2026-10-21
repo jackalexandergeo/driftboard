@@ -1,0 +1,132 @@
+// The items API against a real server on a free port, with its own data folder.
+// Run: npm test
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+function freePort() {
+  return new Promise((resolve) => {
+    const probe = net.createServer().listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+async function startBoard(signIn) {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'driftboard-test-'));
+  const port = await freePort();
+  const server = spawn(process.execPath, [path.join(root, 'server.js')], {
+    env: { ...process.env, PORT: String(port), DRIFTBOARD_DATA: data, DRIFTBOARD_SIGN_IN: signIn ? 'on' : 'off' },
+    stdio: 'ignore',
+  });
+  const url = `http://127.0.0.1:${port}`;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      await fetch(`${url}/api/hello?nonce=x`);
+      break;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  const token = fs.readFileSync(path.join(data, 'token'), 'utf8').trim();
+  return { server, data, url, token };
+}
+
+let open;     // sign-in off
+let locked;   // sign-in on
+
+before(async () => {
+  [open, locked] = await Promise.all([startBoard(false), startBoard(true)]);
+});
+
+after(() => {
+  for (const board of [open, locked]) {
+    board.server.kill();
+    fs.rmSync(board.data, { recursive: true, force: true });
+  }
+});
+
+async function send(board, item, token) {
+  const response = await fetch(`${board.url}/api/items`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(item),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
+async function card(board, cardId) {
+  const response = await fetch(`${board.url}/api/cards/${cardId}`);
+  return (await response.json()).card;
+}
+
+async function workspace(board, workspaceId) {
+  return (await fetch(`${board.url}/api/workspaces/${workspaceId}`)).json();
+}
+
+test('an item becomes a card in the first column of the Inbox, made with the work columns', async () => {
+  const { status, body } = await send(open, {
+    source: 'ci', externalId: 'build-1', title: 'Nightly build failed', body: 'step `test` exited 1',
+    link: { url: 'https://ci.example/build/1', title: 'Build 1' },
+  });
+  assert.equal(status, 201);
+  assert.equal(body.created, true);
+  const made = await card(open, body.cardId);
+  assert.equal(made.title, 'Nightly build failed');
+  assert.equal(made.description, 'step `test` exited 1');
+  assert.deepEqual(made.attachments.map((attachment) => [attachment.type, attachment.url]), [['url', 'https://ci.example/build/1']]);
+  const inbox = await workspace(open, body.workspaceId);
+  assert.equal(inbox.name, 'Inbox');
+  assert.deepEqual(inbox.binders.map((binder) => binder.title), ['New', 'Working', 'Needs you', 'Review', 'Done', "Won't do"]);
+  assert.equal(inbox.binders.find((binder) => binder.id === made.binderId).title, 'New');
+});
+
+test('the same item twice is one card', async () => {
+  const first = await send(open, { source: 'mail', externalId: 'm-7', title: 'Invoice 7 is wrong' });
+  const again = await send(open, { source: 'mail', externalId: 'm-7', title: 'Invoice 7 is wrong' });
+  assert.equal(again.status, 200);
+  assert.deepEqual([again.body.cardId, again.body.duplicate], [first.body.cardId, true]);
+});
+
+test('a later item in the same thread joins its card as a note', async () => {
+  const first = await send(open, { source: 'chat', thread: 't-1', externalId: 'p-1', title: 'Can you look at the export?' });
+  const later = await send(open, { source: 'chat', thread: 't-1', externalId: 'p-2', title: 'Still broken', body: 'since 9am' });
+  assert.deepEqual([later.body.cardId, later.body.joined], [first.body.cardId, true]);
+  const joined = await card(open, first.body.cardId);
+  assert.deepEqual(joined.attachments.map((attachment) => attachment.content), ['**chat**: Still broken\n\nsince 9am']);
+  const elsewhere = await send(open, { source: 'other', thread: 't-1', title: 'Another source, same thread name' });
+  assert.equal(elsewhere.body.created, true);   // threads belong to their source
+});
+
+test('an item names its board and column, and an unknown column is refused with the ones there are', async () => {
+  const placed = await send(open, { source: 'ci', title: 'Flaky test', workspace: 'Builds', column: 'Working' });
+  assert.equal(placed.status, 201);
+  const builds = await workspace(open, placed.body.workspaceId);
+  assert.equal(builds.name, 'Builds');
+  assert.equal(builds.binders.find((binder) => binder.id === (builds.cards[0] || {}).binderId).title, 'Working');
+  const nowhere = await send(open, { source: 'ci', title: 'x', workspace: 'Builds', column: 'Someday' });
+  assert.equal(nowhere.status, 400);
+  assert.deepEqual(nowhere.body.columns, ['New', 'Working', 'Needs you', 'Review', 'Done', "Won't do"]);
+});
+
+test('what is not an item is refused, saying why', async () => {
+  const { status, body } = await send(open, { title: ' ', source: 'Not A Name', link: { url: 'javascript:alert(1)' } });
+  assert.equal(status, 400);
+  assert.deepEqual(body.problems, ['title is required',
+    'source is required: lowercase letters, digits, . _ - (who sent it, e.g. "ci")', 'link.url must be an http or https address']);
+});
+
+test('with sign-in on, an item needs the board token', async () => {
+  const refused = await send(locked, { source: 'ci', title: 'x' });
+  assert.equal(refused.status, 401);
+  const taken = await send(locked, { source: 'ci', title: 'x' }, locked.token);
+  assert.equal(taken.status, 201);
+});
