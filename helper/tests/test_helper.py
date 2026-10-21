@@ -10,7 +10,7 @@ import urllib.error
 from driftboard_helper.board import BoardClient, BoardError
 from driftboard_helper.claude import ClaudeLauncher
 from driftboard_helper.config import DEFAULTS
-from driftboard_helper.helper import CONTEXT, REPLY, START, STOP, Helper
+from driftboard_helper.helper import CONTEXT, REPLY, RESUME, START, STOP, Helper
 
 from .boards import NODE, Board
 
@@ -194,6 +194,22 @@ class HelperTest(unittest.TestCase):
         self.board.call("POST", "/api/cards/%s/chat" % cardId, {"text": "hello, we are testing you"})
         self.helper.passOnce()
         self.assertEqual(session["messages"], ["The user says: hello, we are testing you"])
+
+    def testAStoppedAgentResumesFromItsCard(self):
+        # The user: "when i hit stop, theres no resume button".
+        cardId = self.item("Stop and go")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        self.press(cardId, "stop")
+        self.helper.passOnce()
+        self.assertEqual(self.buttons(cardId), [RESUME["id"], REPLY["id"], CONTEXT["id"]])
+        self.claude.wait()
+        self.press(cardId, "resume")
+        self.helper.passOnce()
+        session = next(iter(self.claude.sessions.values()))
+        self.assertEqual(session["messages"], ["The user pressed Resume: carry on where you left off."])
+        self.assertEqual(self.buttons(cardId), [STOP["id"], CONTEXT["id"]])
 
     def testContextWhileItWorksWaitsForTheEndOfItsTurn(self):
         cardId = self.item("Busy")

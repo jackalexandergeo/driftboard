@@ -31,7 +31,8 @@ AGENT_BIN = os.path.join(HELPER_DIRECTORY, "bin")
 CLOSED_COLUMNS = ("Done", "Won't do")
 
 START = {"id": "start", "label": "▶ Start", "title": "Start an agent on this card"}
-STOP = {"id": "stop", "label": "⏹ Stop", "title": "Stop the agent; ↩ Reply carries on"}
+STOP = {"id": "stop", "label": "⏹ Stop", "title": "Stop the agent; ▶ Resume carries on"}
+RESUME = {"id": "resume", "label": "▶ Resume", "title": "Wake the agent to carry on where it stopped"}
 REPLY = {"id": "reply", "label": "↩ Reply", "title": "Answer the agent, or send its work back",
          "input": "Your answer, or what to change"}
 CONTEXT = {"id": "context", "label": "＋ Context", "title": "Tell the agent something it should know",
@@ -53,7 +54,7 @@ def buttonsFor(run):
     if state == "idle":
         return [REPLY, CONTEXT, STOP]
     if state == "stopped":
-        return [REPLY, CONTEXT]
+        return [RESUME, REPLY, CONTEXT]
     return [START, CONTEXT]
 
 
@@ -146,6 +147,8 @@ class Helper:
         elif button == "stop" and run and run.get("state") in ACTIVE:
             self.launcher.stop(run["session"])
             run["state"] = "stopped"
+        elif button == "resume" and run and run.get("state") == "stopped":
+            self._wake(card["id"], run, "The user pressed Resume: carry on where you left off.")
         elif button in ("reply", "context") and not text:
             logger.warning("card %s: %s pressed without text (is the board older than the helper?)", card["id"], button)
         elif button in ("reply", "context"):
