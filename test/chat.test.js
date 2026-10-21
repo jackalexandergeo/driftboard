@@ -39,6 +39,13 @@ test('a script offers the chat with chatEnabled (or chat), and the messages stay
   assert.deepEqual([off.chatEnabled, off.chat.map((message) => message.text)], [undefined, ['hello']]);
 });
 
+test("a script says when the card's agent has a terminal", async () => {
+  const { cardId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Terminal here' }, board.token)).body;
+  assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { terminalEnabled: 'yes' }, board.token)).status, 400);
+  assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { terminalEnabled: true }, board.token)).body.terminalEnabled, true);
+  assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { terminalEnabled: false }, board.token)).body.terminalEnabled, undefined);
+});
+
 test('the page loads pictures only from the board itself', async () => {
   const policy = (await fetch(`${board.url}/`)).headers.get('Content-Security-Policy');
   assert.match(policy, /img-src 'self' data: blob:/);

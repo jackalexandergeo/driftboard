@@ -43,3 +43,17 @@ test('a script clears only the press it handled; a newer one waits for it', asyn
   assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { pressed: null }, board.token)).body.pressed, undefined);   // as before
   assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { pressedAt: 'x' }, board.token)).status, 400);
 });
+
+test('three buttons on the card, and two more in the open card with place "open"', async () => {
+  const { cardId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Many buttons' }, board.token)).body;
+  const button = (id, place) => ({ id, label: id, ...(place ? { place } : {}) });
+  const fine = [button('a'), button('b'), button('c'), button('d', 'open'), button('e', 'open')];
+  const set = await call(board, 'PATCH', `/api/cards/${cardId}`, { buttons: fine }, board.token);
+  assert.equal(set.status, 200);
+  assert.deepEqual(set.body.buttons.map((each) => [each.id, each.place ?? null]),
+    [['a', null], ['b', null], ['c', null], ['d', 'open'], ['e', 'open']]);
+  for (const buttons of [[...fine.slice(0, 3), button('d')], [...fine, button('f', 'open')], [button('a', 'elsewhere')]]) {
+    assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { buttons }, board.token)).status, 400);
+  }
+  assert.equal((await call(board, 'POST', `/api/cards/${cardId}/press`, { button: 'd' }, board.token)).status, 200);
+});

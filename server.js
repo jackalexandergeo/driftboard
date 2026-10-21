@@ -1033,9 +1033,13 @@ app.get('/api/cards/:id', (req, res) => {
 // Buttons a script puts on its cards (e.g. start / pause): pressing one records it on the card
 // for that script to act on; the board itself runs nothing.
 const BUTTON_ID = /^[a-z][a-z0-9-]{0,31}$/;
+// At most 3 buttons on a card's face, and 5 in all: a button with place "open" shows only in the
+// open card (a terminal, say, which is no use from the board).
 function validButtons(buttons) {
-  return Array.isArray(buttons) && buttons.length <= 3 && buttons.every((button) =>
+  return Array.isArray(buttons) && buttons.length <= 5
+    && buttons.filter((button) => button?.place !== 'open').length <= 3 && buttons.every((button) =>
     button && typeof button === 'object' && BUTTON_ID.test(button.id) &&
+    (button.place === undefined || button.place === 'card' || button.place === 'open') &&
     typeof button.label === 'string' && button.label.trim() && button.label.length <= 24 &&
     (button.title === undefined || (typeof button.title === 'string' && button.title.length <= 120)) &&
     (button.input === undefined || (typeof button.input === 'string' && button.input.trim() && button.input.length <= 120)) &&
@@ -1046,7 +1050,7 @@ app.patch('/api/cards/:id', (req, res) => {
   const found = getCard(req.params.id);
   if (!found) return res.status(404).json({ error: 'card not found' });
   if (req.body.buttons !== undefined && req.body.buttons !== null && !validButtons(req.body.buttons)) {
-    return res.status(400).json({ error: 'buttons: at most 3 of {id: a-z0-9-, label: up to 24 characters, title?, confirm?, input?}' });
+    return res.status(400).json({ error: 'buttons: at most 3 on the card (and 5 in all, with place "open") of {id: a-z0-9-, label: up to 24 characters, title?, confirm?, input?, place?}' });
   }
   if (req.body.pressed !== undefined && req.body.pressed !== null) {
     return res.status(400).json({ error: 'pressed can only be cleared (null); press a button with POST /press' });
@@ -1058,15 +1062,19 @@ app.patch('/api/cards/:id', (req, res) => {
   if (chatEnabled !== undefined && typeof chatEnabled !== 'boolean') {
     return res.status(400).json({ error: 'chatEnabled (or chat) must be true or false: whether the open card offers a chat with its agent' });
   }
+  const { terminalEnabled } = req.body;
+  if (terminalEnabled !== undefined && typeof terminalEnabled !== 'boolean') {
+    return res.status(400).json({ error: "terminalEnabled must be true or false: whether the open card offers its agent's terminal" });
+  }
   const { card } = found;
   if (typeof req.body.title === 'string') card.title = req.body.title;
   if (typeof req.body.description === 'string') card.description = req.body.description;
   if (typeof req.body.attSort === 'string' && ['newest', 'oldest', 'custom'].includes(req.body.attSort)) card.attSort = req.body.attSort;
   if (req.body.buttons !== undefined) {
     if (req.body.buttons && req.body.buttons.length) {
-      card.buttons = req.body.buttons.map(({ id, label, title, confirm, input }) => ({
+      card.buttons = req.body.buttons.map(({ id, label, title, confirm, input, place }) => ({
         id, label: label.trim(), ...(title ? { title } : {}), ...(confirm ? { confirm: confirm.trim() } : {}),
-        ...(input ? { input: input.trim() } : {}),
+        ...(input ? { input: input.trim() } : {}), ...(place === 'open' ? { place } : {}),
       }));
     } else delete card.buttons;
   }
@@ -1076,6 +1084,9 @@ app.patch('/api/cards/:id', (req, res) => {
   // A script that talks to the card's agent offers the chat (card.chat holds the messages themselves).
   if (chatEnabled === true) card.chatEnabled = true;
   else if (chatEnabled === false) delete card.chatEnabled;
+  // The helper says when the card's agent has a session the page can open as a terminal.
+  if (terminalEnabled === true) card.terminalEnabled = true;
+  else if (terminalEnabled === false) delete card.terminalEnabled;
   card.updatedAt = now();
   persist();
   res.json(card);
