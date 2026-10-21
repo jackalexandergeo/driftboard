@@ -339,7 +339,8 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 
 /* the card's chat with its agent */
 .chat-thread { display: flex; flex-direction: column; gap: 8px; max-height: 380px; overflow-y: auto; padding: 2px; }
-.chat-msg { max-width: 85%; align-self: flex-start; padding: 8px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid transparent; }
+.chat-msg { max-width: 85%; min-width: 0; align-self: flex-start; padding: 8px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid transparent; overflow-wrap: anywhere; }
+.chat-body.markdown pre { overflow-x: auto; }
 .chat-msg.user { align-self: flex-end; background: color-mix(in srgb, var(--orange) 14%, var(--surface)); }
 .chat-msg.question { border-color: var(--red); }
 .chat-msg.result { border-color: var(--border-strong); }
