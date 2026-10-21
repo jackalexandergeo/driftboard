@@ -1,10 +1,25 @@
 // Where the board lives and how it is reached, shared by the server and `npm run open`.
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export const DATA_DIR = process.env.DRIFTBOARD_DATA ? path.resolve(process.env.DRIFTBOARD_DATA) : path.join(__dirname, 'data');
+// The board's data folder: DRIFTBOARD_DATA, else the user's data folder ($XDG_DATA_HOME/driftboard,
+// else ~/.local/share/driftboard), where the helper and the pinger look for the token too. A board
+// an earlier version kept in <checkout>/data stays there (legacy: true), until it is moved.
+export function dataDirFor({ env = process.env, home = os.homedir(), legacy = path.join(__dirname, 'data'),
+  exists = fs.existsSync } = {}) {
+  if (env.DRIFTBOARD_DATA) return { dir: path.resolve(env.DRIFTBOARD_DATA), legacy: false };
+  const base = env.XDG_DATA_HOME && path.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : path.join(home, '.local', 'share');
+  const dir = path.join(base, 'driftboard');
+  if (!exists(path.join(dir, 'board.json')) && exists(path.join(legacy, 'board.json'))) return { dir: legacy, legacy: true };
+  return { dir, legacy: false };
+}
+const chosen = dataDirFor();
+export const DATA_DIR = chosen.dir;
+export const LEGACY_DATA_DIR = chosen.legacy;
 export const TOKEN_FILE = path.join(DATA_DIR, 'token');
 export const TOKEN_FORMAT_FILE = path.join(DATA_DIR, 'token-format'); // marks a token made by this version or later
 // The PIN that signs a tab in from the locked page, as a slow hash (see set-pin.js).
