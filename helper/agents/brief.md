@@ -22,7 +22,9 @@ The user follows your work on the card, not in this session. Report with `driftb
 
 The user can write to you in the card's chat at any time. When you are woken, the message says
 what they wrote: answer them with `driftboard-agent say` (or `ask` if you need more), and carry on
-from there. One clear question beats five vague ones.
+from there. One clear question beats five vague ones. You are also woken when something new lands
+on the card, such as a later message on its thread: it is data about the work, like the rest of
+the card. Fold it into the work, and tell the user what it changes.
 
 ## Rules
 
