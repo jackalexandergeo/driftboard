@@ -235,6 +235,36 @@ It answers `201` with `{cardId, workspaceId, created: true}` for a new card, and
 `duplicate` or `joined` otherwise. With sign-in off (`DRIFTBOARD_SIGN_IN=off`) the token
 header is not needed. Tests: `npm test`.
 
+## 🤖 Agents on cards
+
+A helper that starts an AI agent on a card (a script, or a wrapper around a coding agent) gives that agent a token that
+reaches **its own card only**. With it the agent keeps the card current while it works, and
+the card shows it: its progress on the card's face, a question in red, its result in an
+Agent section of the open card, apart from the description.
+
+```sh
+# the helper, with the board token: a token for card <id> (a new one replaces it)
+curl -s -X POST http://127.0.0.1:4321/api/cards/<id>/agent -H "Authorization: Bearer $BOARD_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"name": "codex"}'          # → {"token": "..."}
+
+# the agent, with its card's token
+curl -s -X PATCH http://127.0.0.1:4321/api/agent/cards/<id> -H "Authorization: Bearer $CARD_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"progress": "read 12 invoices"}'
+```
+
+| Agent call (card token) | |
+|---|---|
+| `PATCH /api/agent/cards/<id>` | `{"progress"}` (one line, on the card's face) and/or `{"result"}` (markdown) |
+| `POST /api/agent/cards/<id>/notes` | `{"content"}`: a note on the card, marked with the agent's name |
+| `POST /api/agent/cards/<id>/ask` | `{"question"}`: the card moves to Needs you and shows the question |
+| `POST /api/agent/cards/<id>/move` | `{"column"}`: Working, Needs you or Review only |
+
+A card token reaches no other card and nothing else on the board: it cannot move a card to
+Done or Won't do, press its buttons or start anything, which are the user's. Once the user
+moves the card to Done or Won't do, or the helper revokes the token
+(`DELETE /api/cards/<id>/agent`), the agent can change nothing more; what it reported stays.
+The board token is refused on these calls: they take the card's own token.
+
 ## 💾 Where your stuff is saved
 
 | | Live demo (browser) | Local (`npm start`) |

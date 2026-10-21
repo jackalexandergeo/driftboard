@@ -391,6 +391,97 @@ app.post('/api/pin', express.json({ limit: '1kb' }), (req, res) => {
     });
 });
 
+// ---- Agents: each holds a token that reaches its own card only ----
+// The helper that starts an agent on a card mints a token for that card (with the board token,
+// below). With it the agent keeps its card current: progress, notes, a question for the user,
+// its result, and moves between the working columns. It can never reach another card, move
+// one to Done or Won't do, press a button or start anything: those are the user's.
+const AGENT_COLUMNS = ['Working', 'Needs you', 'Review'];
+const CLOSED_COLUMNS = ['Done', "Won't do"];
+const AGENT_LIMITS = { progress: 300, question: 2000, result: 20000, content: 20000 };
+const agentTokenHash = (token) => createHash('sha256').update(`driftboard-agent:${token}`).digest('hex');
+const columnOf = (ws, card) => ws.binders.find((b) => b.id === card.binderId)?.title || null;
+
+function agentCard(req, res) {
+  const found = getCard(req.params.id);
+  const token = requestToken(req);
+  if (!found || !found.card.agent?.tokenHash || !token || !sameSecret(agentTokenHash(token), found.card.agent.tokenHash)) {
+    res.status(401).json({ error: 'this token does not reach this card' });
+    return null;
+  }
+  if (CLOSED_COLUMNS.includes(columnOf(found.ws, found.card))) {
+    res.status(409).json({ error: 'the user closed this card' });
+    return null;
+  }
+  return found;
+}
+
+function agentText(body, field, res) {
+  const value = body?.[field];
+  if (typeof value !== 'string' || !value.trim()) return res.status(400).json({ error: `${field} is required` }), null;
+  if (value.length > AGENT_LIMITS[field]) return res.status(400).json({ error: `${field} is longer than ${AGENT_LIMITS[field]} characters` }), null;
+  return value.trim();
+}
+
+function moveCard(ws, card, binder) {
+  const from = card.binderId;
+  card.binderId = binder.id;
+  card.order = ws.cards.filter((c) => c.binderId === binder.id && c.id !== card.id).length;
+  reindexBinder(ws, from);
+  reindexBinder(ws, binder.id);
+}
+
+const agentApi = express.Router();
+agentApi.use(express.json({ limit: '64kb' }));
+agentApi.patch('/cards/:id', (req, res) => {   // {progress?, result?}
+  const found = agentCard(req, res); if (!found) return;
+  const { card } = found;
+  for (const field of ['progress', 'result']) {
+    if (req.body?.[field] === undefined) continue;
+    const value = agentText(req.body, field, res); if (value === null) return;
+    card.agent[field] = value;
+  }
+  card.agent.updatedAt = now();
+  card.updatedAt = now();
+  persist();
+  res.json({ ok: true });
+});
+agentApi.post('/cards/:id/notes', (req, res) => {   // {content}
+  const found = agentCard(req, res); if (!found) return;
+  const content = agentText(req.body, 'content', res); if (content === null) return;
+  const { card } = found;
+  card.attachments.push({ id: randomUUID(), type: 'text', content, by: card.agent.name, createdAt: now(),
+    order: card.attachments.length });
+  card.updatedAt = now();
+  persist();
+  res.status(201).json({ ok: true });
+});
+agentApi.post('/cards/:id/ask', (req, res) => {   // {question}: the card goes to Needs you
+  const found = agentCard(req, res); if (!found) return;
+  const question = agentText(req.body, 'question', res); if (question === null) return;
+  const { ws, card } = found;
+  card.agent.question = question;
+  card.agent.askedAt = now();
+  const binder = ws.binders.find((b) => b.title === 'Needs you');
+  if (binder) moveCard(ws, card, binder);
+  card.updatedAt = now();
+  persist();
+  res.json({ ok: true });
+});
+agentApi.post('/cards/:id/move', (req, res) => {   // {column}: Working, Needs you or Review
+  const found = agentCard(req, res); if (!found) return;
+  const { ws, card } = found;
+  const column = typeof req.body?.column === 'string' ? req.body.column.trim() : '';
+  const binder = AGENT_COLUMNS.includes(column) && ws.binders.find((b) => b.title === column);
+  if (!binder) return res.status(400).json({ error: `an agent moves its card only to ${AGENT_COLUMNS.join(', ')}` });
+  moveCard(ws, card, binder);
+  if (column !== 'Needs you') delete card.agent.question;   // answered: back to work, or done
+  card.updatedAt = now();
+  persist();
+  res.json({ ok: true });
+});
+app.use('/api/agent', agentApi);   // before the board token: these take the card's own token
+
 app.use('/api', requireToken);
 app.use('/api', (req, res, next) => {
   const json = res.json.bind(res);
@@ -671,6 +762,30 @@ app.post('/api/items', (req, res) => {
   ws.cards.push(card);
   persist();
   res.status(201).json({ cardId: card.id, workspaceId: ws.id, created: true });
+});
+
+// The helper starting an agent on a card mints its token (shown once; a new one replaces it),
+// and revokes it when the agent stops. What the agent reported stays on the card.
+app.post('/api/cards/:id/agent', (req, res) => {
+  const found = getCard(req.params.id);
+  if (!found) return res.status(404).json({ error: 'card not found' });
+  const name = typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim().slice(0, 60) : 'agent';
+  const token = randomBytes(32).toString('base64url');
+  found.card.agent = { ...(found.card.agent || {}), name, tokenHash: agentTokenHash(token), startedAt: now() };
+  delete found.card.agent.stoppedAt;
+  persist();
+  res.status(201).json({ token, cardId: found.card.id });
+});
+app.delete('/api/cards/:id/agent', (req, res) => {
+  const found = getCard(req.params.id);
+  if (!found) return res.status(404).json({ error: 'card not found' });
+  if (found.card.agent) {
+    delete found.card.agent.tokenHash;
+    delete found.card.agent.question;
+    found.card.agent.stoppedAt = now();
+    persist();
+  }
+  res.json({ ok: true });
 });
 
 // Which board a card is on, for a link straight to it.

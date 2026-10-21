@@ -225,6 +225,10 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 }
 .card-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
 .card-buttons { display: flex; gap: 6px; margin-top: 8px; }
+.card-agent { font-size: 12px; color: var(--muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-agent.asks { color: var(--red); font-weight: 600; }
+.agent-question { color: var(--red); font-weight: 600; margin-bottom: 8px; white-space: pre-wrap; }
+.agent-progress { color: var(--muted); margin-bottom: 8px; white-space: pre-wrap; }
 .card-button { font: inherit; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; cursor: pointer;
   border: 1px solid var(--binder-color, var(--gray)); background: transparent; color: var(--text); }
 .card-button:hover:not(:disabled) { background: var(--binder-color, var(--gray)); color: var(--bg); }

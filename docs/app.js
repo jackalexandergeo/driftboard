@@ -409,6 +409,14 @@ function cardBadges(card) {
   return `${badges}${thumbs ? `<div class="card-thumbs">${thumbs}</div>` : ''}`;
 }
 
+// What the card's agent last said, for the card's face: its question first, else its progress.
+function cardAgentLine(card) {
+  const agent = card.agent;
+  if (!agent) return null;
+  if (agent.question) return { text: `❗ ${agent.question}`, asks: true };
+  return agent.progress ? { text: `🤖 ${agent.progress}`, asks: false } : null;
+}
+
 // The buttons a script put on the card. Pressing one only records it on the card; the script
 // that owns the card acts on it and clears it (until then the button waits, disabled).
 function cardButtons(card) {
@@ -448,8 +456,11 @@ function makeCardEl(card, free) {
     const binder = ws.binders.find((b) => b.id === card.binderId);
     if (binder) el.style.setProperty('--binder-color', binderColor(binder, ws.binders.indexOf(binder)));
   }
-  el.innerHTML = `<div class="card-accent"></div><div class="card-title-txt"></div><div class="card-desc"></div>${cardBadges(card)}`;
+  el.innerHTML = `<div class="card-accent"></div><div class="card-title-txt"></div><div class="card-agent"></div><div class="card-desc"></div>${cardBadges(card)}`;
   el.querySelector('.card-title-txt').textContent = card.title;
+  const agentEl = el.querySelector('.card-agent');
+  const agentLine = cardAgentLine(card);
+  if (agentLine) { agentEl.textContent = agentLine.text; agentEl.classList.toggle('asks', agentLine.asks); } else agentEl.remove();
   const descEl = el.querySelector('.card-desc');
   const preview = stripMd(card.description);
   if (preview) descEl.textContent = preview; else descEl.remove();
@@ -818,7 +829,19 @@ function showCard(card) {
   titleInput.value = card.title;
   fitTitle();
   showCardMeta(card);
-  renderDescription(); renderAttachments(); updateSortBtn();
+  renderAgent(card); renderDescription(); renderAttachments(); updateSortBtn();
+}
+// What the card's agent reported: its own section, apart from the description, which stays yours.
+function renderAgent(card) {
+  const agent = card.agent;
+  $('agent-section').classList.toggle('hidden', !agent);
+  if (!agent) return;
+  const state = agent.stoppedAt ? `stopped ${shortDate(agent.stoppedAt)}` : `since ${shortDate(agent.startedAt)}`;
+  $('agent-head').textContent = `Agent: ${agent.name || 'agent'} · ${state}`;
+  $('agent-question').classList.toggle('hidden', !agent.question);
+  $('agent-question').textContent = agent.question ? `Needs you: ${agent.question}` : '';
+  $('agent-progress').textContent = agent.progress || '';
+  $('agent-result').innerHTML = agent.result ? renderMarkdown(agent.result) : '';
 }
 function showCardMeta(card) {
   $('card-meta').textContent = `Created ${shortDate(card.createdAt)} · Updated ${shortDate(card.updatedAt)}`;
