@@ -1208,7 +1208,22 @@ app.use((err, req, res, next) => {
   res.status(400).json({ error: err.message || 'request failed' });
 });
 
-app.listen(PORT, HOST, () => {
+// On this machine's loopback the board holds both families, 127.0.0.1 and [::1]. A client that
+// dials localhost may try either first: were the other one free, another user could listen
+// there, relay the hello to the board (the proof would check out) and take the token.
+const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '::1'];
+const listenHosts = LOOPBACK_HOSTS.includes(HOST) && Number(PORT) !== 0 ? ['127.0.0.1', '::1'] : [HOST];
+listenHosts.forEach((host, index) => {
+  const server = app.listen(PORT, host, index === 0 ? started : undefined);
+  server.on('error', (error) => {
+    if (index === 0) { console.error(`the board cannot listen on ${host}:${PORT}: ${error.message}`); process.exit(1); }
+    if (error.code === 'EADDRINUSE') {
+      console.warn(`warning: another program listens on [${host}]:${PORT}: a client that dials localhost may reach it `
+        + `instead of the board. Clients should use ${localURL()}.`);
+    }   // no IPv6 here: nothing to hold
+  });
+});
+function started() {
   console.log(SIGN_IN ? `driftboard running at ${localURL()}; open it with: npm run open`
     : `driftboard running at ${localURL()} with no sign-in (DRIFTBOARD_SIGN_IN=off): anyone on this machine can open it`);
   console.log(`data dir: ${DATA_DIR}`);
@@ -1216,4 +1231,4 @@ app.listen(PORT, HOST, () => {
     console.log('  (an earlier version\'s folder, kept because the board is there: the helper and the pinger look in '
       + '~/.local/share/driftboard, so move it there, or set DRIFTBOARD_DATA for all three)');
   }
-});
+}

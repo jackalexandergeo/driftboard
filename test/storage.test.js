@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { call, newDataFolder, startBoard, stopBoard } from './helpers.js';
@@ -84,6 +85,19 @@ test('with sign-in off, the board will not listen where other machines reach it'
     fs.rmSync(data, { recursive: true, force: true });
   }
 });
+
+const hasIPv6Loopback = Object.values(os.networkInterfaces()).flat().some((each) => each?.address === '::1');
+test('on loopback the board holds both 127.0.0.1 and [::1], so no other program can answer for it there',
+  { skip: !hasIPv6Loopback && 'no IPv6 loopback here' }, async () => {
+    const running = await startBoard(true);
+    try {
+      const port = new URL(running.url).port;
+      const answer = await (await fetch(`http://[::1]:${port}/api/hello?nonce=${'ab'.repeat(16)}`)).json();
+      assert.equal(typeof answer.proof, 'string');
+    } finally {
+      await stopBoard(running);
+    }
+  });
 
 test('a write cut off between its two renames is picked up from the written file', async () => {
   const data = newDataFolder();
