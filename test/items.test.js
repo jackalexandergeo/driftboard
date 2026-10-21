@@ -65,6 +65,22 @@ test('a later item in the same thread joins its card as a note', async () => {
   assert.equal(elsewhere.body.created, true);   // threads belong to their source
 });
 
+test('a later item on a closed thread brings its card back where new items land', async () => {
+  const first = await send(locked, { source: 'mail', thread: 'refund-7', title: 'Refund request' }, locked.token);
+  const inbox = await (await fetch(`${locked.url}/api/workspaces/${first.body.workspaceId}`, {
+    headers: { Authorization: `Bearer ${locked.token}` } })).json();
+  const column = (title) => inbox.binders.find((binder) => binder.title === title).id;
+  await fetch(`${locked.url}/api/cards/${first.body.cardId}/move`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${locked.token}` },
+    body: JSON.stringify({ binderId: column('Done'), toIndex: 0 }) });
+  const later = await send(locked, { source: 'mail', thread: 'refund-7', title: 'Re: refund request', body: 'still waiting' }, locked.token);
+  assert.deepEqual([later.body.joined, later.body.reopened], [true, true]);
+  const reopened = (await (await fetch(`${locked.url}/api/cards/${first.body.cardId}`, {
+    headers: { Authorization: `Bearer ${locked.token}` } })).json()).card;
+  assert.equal(reopened.binderId, column('New'));
+  assert.match(reopened.attachments.at(-1).content, /^_Reopened: a new item came in on this thread\._/);
+});
+
 test("a later item's link is attached to the thread's card, once", async () => {
   const first = await send(open, { source: 'ci', thread: 'nightly', title: 'Nightly failed', link: { url: 'https://ci.example/1' } });
   for (const run of [2, 2]) {

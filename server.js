@@ -826,7 +826,12 @@ app.post('/api/items', (req, res) => {
     for (const ws of state.workspaces) {
       const card = ws.cards.find((c) => c.source?.name === source && c.source.thread === item.thread);
       if (!card) continue;
-      const content = [`**${source}**: ${item.title.trim()}`, (item.body || '').trim()].filter(Boolean).join('\n\n');
+      // On a closed card nobody would see it: the card comes back where a new item lands.
+      const landing = ws.binders[0];
+      const reopened = CLOSED_COLUMNS.includes(columnOf(ws, card)) && landing && !CLOSED_COLUMNS.includes(landing.title);
+      if (reopened) moveCard(ws, card, landing);
+      const content = [reopened ? `_Reopened: a new item came in on this thread._` : '', `**${source}**: ${item.title.trim()}`,
+        (item.body || '').trim()].filter(Boolean).join('\n\n');
       card.attachments.push({ id: randomUUID(), type: 'text', content, createdAt: now(), order: card.attachments.length });
       if (item.link && !card.attachments.some((a) => a.type === 'url' && a.url === webURL(item.link.url))) {
         card.attachments.push({ id: randomUUID(), type: 'url', url: webURL(item.link.url), title: (item.link.title || '').trim(),
@@ -835,7 +840,7 @@ app.post('/api/items', (req, res) => {
       remember(card);
       card.updatedAt = now();
       persist();
-      return res.json({ cardId: card.id, workspaceId: ws.id, created: false, joined: true });
+      return res.json({ cardId: card.id, workspaceId: ws.id, created: false, joined: true, ...(reopened ? { reopened: true } : {}) });
     }
   }
   const wanted = (item.workspace || 'Inbox').trim();
