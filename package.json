@@ -12,9 +12,12 @@
     "test:helper": "cd helper && python3 -m unittest discover -s tests -t ."
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "dompurify": "^3.4.12",
     "express": "^4.22.2",
     "marked": "^15.0.12",
-    "multer": "^2.2.0"
+    "multer": "^2.2.0",
+    "ws": "^8.18.0"
   }
 }
