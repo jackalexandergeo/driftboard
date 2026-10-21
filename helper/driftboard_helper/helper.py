@@ -4,7 +4,7 @@ adds, takes its reports to the card, and stops it when the user closes the card.
 
     driftboard-helper run       the loop (what the systemd unit runs)
     driftboard-helper once      one pass
-    driftboard-helper check     what is wrong with the config, if anything
+    driftboard-helper check     what stands in the way, if anything: config, tool, token, board
 """
 
 import argparse
@@ -556,13 +556,15 @@ def main(arguments=None):
     options = parser.parse_args(arguments)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     config = loadConfig()
+    if options.command == "check":   # everything, with how to fix each: the config, the tool, the board
+        from .checks import checks, report
+        lines, fine = report(checks(config))
+        print("\n".join(lines))
+        return 0 if fine else 1
     problems = configProblems(config)
     if problems:
-        print("driftboard-helper: config: %s" % "; ".join(problems), file=sys.stderr)
+        print("driftboard-helper: config: %s (run `driftboard-helper check`)" % "; ".join(problems), file=sys.stderr)
         return 1
-    if options.command == "check":
-        print("config is fine")
-        return 0
     helper = build(config)
     while True:
         passSafely(helper)

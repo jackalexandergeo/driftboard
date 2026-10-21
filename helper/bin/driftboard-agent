@@ -1,4 +1,8 @@
 #!/bin/sh
 # What an agent runs to keep its card current (see driftboard_helper/agentctl.py).
 here="$(cd "$(dirname "$0")/.." && pwd)"
+python3 -c "import sys; sys.exit(sys.version_info < (3, 11))" 2>/dev/null || {
+    echo "driftboard-agent needs Python 3.11 or newer; python3 here is $(python3 --version 2>&1)" >&2
+    exit 1
+}
 PYTHONPATH="$here" exec python3 -P -m driftboard_helper.agentctl "$@"
