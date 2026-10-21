@@ -63,7 +63,17 @@ class PingerTest(unittest.TestCase):
         self.assertIn('no column "Someday" on Inbox (its columns: New, Working, Needs you', err)
         status, _, err = run("x", "--url", self.board.url, "--token-file", os.path.join(REPO, "no-such-token"))
         self.assertEqual(status, 1)
-        self.assertIn("the board wants its token: none at", err)
+        self.assertIn("the board wants its items key or token: none at", err)
+
+    def testByDefaultThePingerSendsTheItemsKeyFromTheBoardsDataFolder(self):
+        with mock.patch.dict(os.environ, {"DRIFTBOARD_DATA": self.board.data}):
+            for name in ("DRIFTBOARD_ITEMS_KEY_FILE", "DRIFTBOARD_TOKEN_FILE"):
+                os.environ.pop(name, None)
+            self.assertEqual(pinger.defaultSecret(), (os.path.join(self.board.data, "items-key"), "items"))
+            status, out, _ = run("Sent with the items key", "--url", self.board.url, "--json")
+        self.assertEqual(status, 0)
+        self.assertEqual(self.board.call("GET", "/api/cards/%s" % json.loads(out)["cardId"])["card"]["title"],
+                         "Sent with the items key")
 
 
 class NotTheBoard(http.server.BaseHTTPRequestHandler):
@@ -101,6 +111,12 @@ class ImpostorTest(unittest.TestCase):
             status, _, err = run("x", "--url", "http://127.0.0.1:%d" % server.server_address[1], "--token-file", tokenFile.name)
         self.assertEqual(status, 1)
         self.assertIn("could not prove it is the board; its token was not sent", err)
+        with tempfile.NamedTemporaryFile("w", suffix=".key") as keyFile:
+            keyFile.write("the-items-key")
+            keyFile.flush()
+            status, _, err = run("x", "--url", "http://127.0.0.1:%d" % server.server_address[1], "--key-file", keyFile.name)
+        self.assertEqual(status, 1)
+        self.assertIn("could not prove it is the board; its items key was not sent", err)
         self.assertEqual(NotTheBoard.seen, [])
 
 

@@ -9,19 +9,21 @@ file, watch what you watch, and call ping() for each thing worth a card. Standar
 Items from one source in the same thread are one card (a later one joins it as a note), and the
 same --id sent twice is put on the board once.
 
-The board's token goes only to a server that first proves it holds it: another user can take
-the board's port while the board is down.
+It sends the board's items key (<data>/items-key), which can put items on the board and do
+nothing else, or the board's token when there is no items key. Either goes only to a server that
+first proves it holds it, on the same connection: another user can take the board's port while
+the board is down.
 """
 
 import argparse
 import hashlib
 import hmac
+import http.client
 import json
 import os
 import secrets
 import sys
-import urllib.error
-import urllib.request
+import urllib.parse
 
 DEFAULT_URL = "http://127.0.0.1:4321"
 
@@ -32,39 +34,74 @@ class PingError(Exception):
         self.answer = answer or {}
 
 
-def defaultTokenFile():
+def dataFolder():
+    """Where the board keeps its data: $DRIFTBOARD_DATA, else $XDG_DATA_HOME/driftboard, else
+    ~/.local/share/driftboard (as the board itself picks it)."""
+    if os.environ.get("DRIFTBOARD_DATA"):
+        return os.environ["DRIFTBOARD_DATA"]
+    base = os.environ.get("XDG_DATA_HOME", "")
+    return os.path.join(base if os.path.isabs(base) else os.path.expanduser("~/.local/share"), "driftboard")
+
+
+def defaultSecret():
+    """(path, kind): the items key when there is one, else the board's token."""
+    if os.environ.get("DRIFTBOARD_ITEMS_KEY_FILE"):
+        return os.environ["DRIFTBOARD_ITEMS_KEY_FILE"], "items"
     if os.environ.get("DRIFTBOARD_TOKEN_FILE"):
-        return os.environ["DRIFTBOARD_TOKEN_FILE"]
-    return os.path.join(os.environ.get("DRIFTBOARD_DATA") or os.path.expanduser("~/.local/share/driftboard"), "token")
+        return os.environ["DRIFTBOARD_TOKEN_FILE"], "token"
+    itemsKey = os.path.join(dataFolder(), "items-key")
+    return (itemsKey, "items") if os.path.exists(itemsKey) else (os.path.join(dataFolder(), "token"), "token")
 
 
-def readToken(path):
-    """The board's token, or None: a board with sign-in off takes items without one."""
+def readSecret(path):
+    """The key or token in path, or None: a board with sign-in off takes items without one."""
     try:
-        with open(os.path.expanduser(path)) as tokenFile:
-            return tokenFile.read().strip() or None
+        with open(os.path.expanduser(path)) as secretFile:
+            return secretFile.read().strip() or None
     except FileNotFoundError:
         return None
     except OSError as error:
-        raise PingError("cannot read the board's token (%s): %s" % (path, error))
+        raise PingError("cannot read %s: %s" % (path, error))
 
 
-def proveBoard(opener, url, token, timeout):
-    nonce = secrets.token_hex(16)
+def connectionTo(url, timeout):
+    """One connection to the board (no proxy: straight to it), and the path its API is under."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise PingError("the board's address must be http:// or https://, not %s" % url)
+    kind = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+    return kind(parts.hostname, parts.port, timeout=timeout), parts.path.rstrip("/")
+
+
+def answerOf(connection):
+    response = connection.getresponse()
+    data = response.read()
     try:
-        with opener.open("%s/api/hello?nonce=%s" % (url, nonce), timeout=timeout) as response:
-            proof = json.loads(response.read() or b"null").get("proof")
-    except (OSError, ValueError, AttributeError) as error:
-        raise PingError("the board at %s did not answer: %s" % (url, error))
-    wanted = hmac.new(token.encode(), ("driftboard-hello:" + nonce).encode(), hashlib.sha256).hexdigest()
+        return response.status, json.loads(data or b"null") or {}
+    except ValueError:
+        return response.status, {}
+
+
+def proveBoard(connection, base, secret, kind, url):
+    """The server proves it holds the secret before it is sent: an HMAC of a fresh nonce."""
+    nonce = secrets.token_hex(16)
+    connection.request("GET", "%s/api/hello?nonce=%s%s" % (base, nonce, "&key=items" if kind == "items" else ""))
+    _status, answer = answerOf(connection)
+    proof = answer.get("proof") if isinstance(answer, dict) else None
+    wanted = hmac.new(secret.encode(), ("driftboard-hello:" + nonce).encode(), hashlib.sha256).hexdigest()
     if not isinstance(proof, str) or not hmac.compare_digest(proof, wanted):
-        raise PingError("the server at %s could not prove it is the board; its token was not sent" % url)
+        raise PingError("the server at %s could not prove it is the board; its %s was not sent"
+                        % (url, "items key" if kind == "items" else "token"))
+    if connection.sock is None:
+        raise PingError("the board at %s closed the connection after the proof; nothing was sent" % url)
+    connection.auto_open = 0   # the secret goes on this connection or not at all
 
 
-def refusal(status, answer, tokenPath, token):
+def refusal(status, answer, path, kind, secret):
     if status == 401:
-        return ("the board wants its token: none at %s (set DRIFTBOARD_TOKEN_FILE)" % tokenPath if token is None
-                else "the board did not take the token in %s" % tokenPath)
+        what = "items key" if kind == "items" else "token"
+        return ("the board wants its items key or token: none at %s (set DRIFTBOARD_ITEMS_KEY_FILE)" % path
+                if secret is None else "the board did not take the %s in %s" % (what, path))
     why = "; ".join(answer.get("problems") or []) or answer.get("error") or "HTTP %d" % status
     if answer.get("columns"):
         why += " (its columns: %s)" % ", ".join(answer["columns"])
@@ -72,9 +109,10 @@ def refusal(status, answer, tokenPath, token):
 
 
 def ping(title, body=None, source="ping", externalId=None, thread=None, link=None, linkTitle=None,
-         workspace=None, column=None, url=None, tokenFile=None, timeout=10):
+         workspace=None, column=None, url=None, tokenFile=None, keyFile=None, timeout=10):
     """One item for the board. Returns its answer: {cardId, workspaceId} and created, joined or
-    duplicate. Raises PingError with what went wrong."""
+    duplicate. keyFile: the items key; tokenFile: the board's token; by default the items key in
+    the board's data folder, else its token. Raises PingError with what went wrong."""
     item = {"source": source, "title": title}
     for key, value in (("body", body), ("externalId", externalId), ("thread", thread),
                        ("workspace", workspace), ("column", column)):
@@ -83,25 +121,23 @@ def ping(title, body=None, source="ping", externalId=None, thread=None, link=Non
     if link:
         item["link"] = dict({"url": link}, **({"title": linkTitle} if linkTitle else {}))
     url = (url or os.environ.get("DRIFTBOARD_URL") or DEFAULT_URL).rstrip("/")
-    tokenPath = tokenFile or defaultTokenFile()
-    token = readToken(tokenPath)
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # straight to the board, whatever proxy is set
-    headers = {"Content-Type": "application/json"}
-    if token:
-        proveBoard(opener, url, token, timeout)
-        headers["Authorization"] = "Bearer " + token
-    request = urllib.request.Request(url + "/api/items", data=json.dumps(item).encode(), method="POST", headers=headers)
+    path, kind = (keyFile, "items") if keyFile else (tokenFile, "token") if tokenFile else defaultSecret()
+    secret = readSecret(path)
+    connection, base = connectionTo(url, timeout)
     try:
-        with opener.open(request, timeout=timeout) as response:
-            return json.loads(response.read())
-    except urllib.error.HTTPError as error:
-        try:
-            answer = json.loads(error.read() or b"null") or {}
-        except ValueError:
-            answer = {}
-        raise PingError(refusal(error.code, answer, tokenPath, token), answer)
-    except (OSError, ValueError) as error:
+        headers = {"Content-Type": "application/json"}
+        if secret:
+            proveBoard(connection, base, secret, kind, url)
+            headers["Authorization"] = "Bearer " + secret
+        connection.request("POST", base + "/api/items", json.dumps(item).encode(), headers)
+        status, answer = answerOf(connection)
+    except (OSError, http.client.HTTPException) as error:
         raise PingError("the board at %s did not answer: %s" % (url, error))
+    finally:
+        connection.close()
+    if status >= 400:
+        raise PingError(refusal(status, answer, path, kind, secret), answer)
+    return answer
 
 
 def main(argv=None):
@@ -118,14 +154,18 @@ def main(argv=None):
     parser.add_argument("--board", dest="workspace", help="which board, by name (default: Inbox)")
     parser.add_argument("--column", help="which column, by title (default: the first)")
     parser.add_argument("--url", help="the board (default: $DRIFTBOARD_URL or %s)" % DEFAULT_URL)
-    parser.add_argument("--token-file", help="the board's token (default: $DRIFTBOARD_TOKEN_FILE, else "
-                                             "$DRIFTBOARD_DATA/token, else ~/.local/share/driftboard/token)")
+    parser.add_argument("--key-file", help="the board's items key (default: $DRIFTBOARD_ITEMS_KEY_FILE, else "
+                                           "items-key in the board's data folder: $DRIFTBOARD_DATA, else "
+                                           "~/.local/share/driftboard)")
+    parser.add_argument("--token-file", help="the board's token instead (default: $DRIFTBOARD_TOKEN_FILE, or the "
+                                             "token in the data folder when there is no items key)")
     parser.add_argument("--json", action="store_true", help="print the board's answer as JSON")
     arguments = parser.parse_args(argv)
     body = sys.stdin.read() if arguments.body == "-" else arguments.body
     try:
         answer = ping(arguments.title, body, arguments.source, arguments.externalId, arguments.thread, arguments.link,
-                      arguments.link_title, arguments.workspace, arguments.column, arguments.url, arguments.token_file)
+                      arguments.link_title, arguments.workspace, arguments.column, arguments.url, arguments.token_file,
+                      arguments.key_file)
     except PingError as error:
         print("driftboard-ping: %s" % error, file=sys.stderr)
         return 1
