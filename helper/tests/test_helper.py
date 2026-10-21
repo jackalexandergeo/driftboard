@@ -526,6 +526,12 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(first)), ["gh", "git", "glab", "scp", "sftp"])   # ssh opened: no stand-in
         run = self.helper.state["runs"][cardId]
         self.assertEqual(os.stat(os.path.join(run["control"], "settings.json")).st_mode & 0o777, 0o600)
+        # this machine's own secrets, wherever they are: the board's token and the helper's state
+        state = os.path.realpath(os.path.join(self.directory.name, "state"))
+        token = os.path.realpath(self.board.tokenFile)
+        for rule in ("Read(/%s)" % token, "Bash(*%s*)" % token, "Read(/%s/**)" % os.path.dirname(token),
+                     "Read(/%s/state.json)" % state, "Read(/%s/control/**)" % state, "Edit(/%s/control/**)" % state):
+            self.assertIn(rule, permissions["deny"])
         # the agent writes its run folder; its settings and stand-ins are not in it
         self.assertFalse(set(os.listdir(run["folder"])) & {"settings.json", "guards", "session-env.sh"})
         self.assertFalse(first.startswith(run["folder"]))

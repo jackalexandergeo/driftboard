@@ -6,6 +6,7 @@ agent's first prompt. None of them is a sandbox; together they are the floor.
 Other machines are the user's call, per command ([agent.access]): "deny" (default), "ask"
 (Claude waits for the user's yes on every use) or "allow"."""
 
+import os
 import re
 
 # Chat, mail and calendars are other people's: nothing is ever sent from the user's accounts.
@@ -71,7 +72,8 @@ LIMIT_TEXTS = {
     "push": "git push in any form",
     "http": "send an HTTP request that writes (POST, PUT, PATCH, DELETE, a form or an upload) by hand",
     "credentials": "read credential or token files (~/.ssh, ~/.netrc, ~/.config/gh, ~/.config/glab-cli, "
-                   "~/.claude/.credentials.json, ~/.codex/auth.json, the board's data folder) or use what is in them",
+                   "~/.claude/.credentials.json, ~/.codex/auth.json, the board's data folder and token, the helper's "
+                   "own state) or use what is in them",
 }
 
 HARD_RULES = [
@@ -88,9 +90,19 @@ def limitsOf(limits):
     return dict(DEFAULT_LIMITS, **(limits or {}))
 
 
-def limitPatterns():
+def pathPatterns(path, folder=False, rule="Read"):
+    """Claude Code rules naming one path: the file tool's (everything in a folder), and any Bash
+    command that names it, absolute or from the home folder (~/…, $HOME/…)."""
+    home = os.path.expanduser("~")
+    named = [path] + ([path[len(home) + 1:]] if path.startswith(home + os.sep) else [])
+    return ["%s(/%s%s)" % (rule, path, "/**" if folder else "")] + ["Bash(*%s*)" % name for name in named]
+
+
+def limitPatterns(secrets=()):
+    """secrets: (path, is a folder) for this machine's own token files (the board's, the helper's)."""
+    credentials = list(CREDENTIALS) + [pattern for path, folder in secrets for pattern in pathPatterns(path, folder)]
     return {"chat": list(CHAT_TOOLS), "codeHost": forgeWrites(), "push": list(PUSHES), "http": list(HTTP_WRITES),
-            "credentials": list(CREDENTIALS)}
+            "credentials": credentials}
 
 
 def limitRules(limits):
@@ -165,14 +177,17 @@ def guidanceFor(access=None, limits=None):
     return soft + [rule for rule in accessRules(access) if not rule.startswith("Never")]
 
 
-def claudePermissions(access=None, extraDeny=(), limits=None):
-    """{"deny": [...], "ask"?: [...], "allow"?: [...]} for a Claude Code session's settings."""
+def claudePermissions(access=None, extraDeny=(), limits=None, secrets=(), protected=()):
+    """{"deny": [...], "ask"?: [...], "allow"?: [...]} for a Claude Code session's settings.
+    secrets: (path, is a folder) read only as the credentials limit says; protected: (path, is a
+    folder) never edited (the helper's own state and the run's settings)."""
     permissions = accessPermissions(access)
     limits = limitsOf(limits)
-    for kind, patterns in limitPatterns().items():
+    for kind, patterns in limitPatterns(secrets).items():
         if limits[kind] == "never":
             permissions["deny"] = patterns + permissions["deny"]
         elif limits[kind] == "ask":
             permissions["ask"] = patterns + permissions["ask"]
-    deny = permissions["deny"] + list(extraDeny)
+    edits = ["Edit(/%s%s)" % (path, "/**" if folder else "") for path, folder in protected]
+    deny = permissions["deny"] + edits + list(extraDeny)
     return {"deny": deny, **{level: permissions[level] for level in ("ask", "allow") if permissions[level]}}

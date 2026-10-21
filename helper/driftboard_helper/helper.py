@@ -340,7 +340,8 @@ class Helper:
         settings = {
             "env": {"DRIFTBOARD_OUTBOX": outbox, "DRIFTBOARD_RUN": folder, "CLAUDE_ENV_FILE": environmentFile,
                     "DRIFTBOARD_GIT_HOSTS": ",".join(agent.get("gitHosts") or [])},
-            "permissions": claudePermissions(agent.get("access"), agent.get("denyCommands") or [], agent.get("limits")),
+            "permissions": claudePermissions(agent.get("access"), agent.get("denyCommands") or [], agent.get("limits"),
+                                             self._secrets(), self._protected()),
             # "$defaults" keeps auto mode's own rules; ours come on top
             "autoMode": {"hard_deny": ["$defaults"] + rulesFor(agent.get("access"), agent.get("rules") or [],
                                                               agent.get("limits"))},
@@ -354,6 +355,22 @@ class Helper:
             json.dump(settings, settingsFile, indent=1)
         os.replace(path + ".new", path)
         return path
+
+    def _secrets(self):
+        """(path, is a folder): the board's token and data folders, wherever this machine keeps them,
+        and the helper's own state (every card's token is in state.json)."""
+        tokenFile = os.path.realpath(os.path.expanduser(getattr(self.board, "tokenFile", self.config["board"]["tokenFile"])))
+        data = os.environ.get("DRIFTBOARD_DATA") or os.path.join(
+            os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "driftboard")
+        folders = [os.path.dirname(tokenFile), os.path.realpath(os.path.expanduser(data)),
+                   os.path.join(os.path.dirname(HELPER_DIRECTORY), "data")]   # the board's own default, in its checkout
+        found = [(tokenFile, False)] + [(folder, True) for folder in dict.fromkeys(folders)]
+        return found + self._protected()
+
+    def _protected(self):
+        state = os.path.realpath(self.directory)
+        return [(os.path.join(state, "state.json"), False), (os.path.join(state, "codex.json"), False),
+                (os.path.join(state, "control"), True)]
 
     def _environment(self, folder, outbox, control):
         """For a tool without a settings file (Codex): what a Claude session gets through its settings."""

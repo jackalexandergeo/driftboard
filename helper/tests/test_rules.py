@@ -1,4 +1,5 @@
 import copy
+import os
 import unittest
 
 from driftboard_helper.config import DEFAULTS, configProblems
@@ -37,6 +38,18 @@ class AccessTest(unittest.TestCase):
         self.assertIn("Bash(glab *mr create*)", never["deny"])
         self.assertIn("Never write to a code host", " ".join(rulesFor(limits={"codeHost": "never"})))
         self.assertEqual(unguarded(None, {"codeHost": "never", "push": "never"}), [])
+
+    def testThisMachinesSecretsFollowTheCredentialsLimitAndTheStateIsNeverEdited(self):
+        home = os.path.expanduser("~")
+        secrets = [(os.path.join(home, ".local/share/driftboard/token"), False), ("/srv/board", True)]
+        protected = [("/var/helper/control", True)]
+        held = claudePermissions(None, [], None, secrets, protected)
+        for rule in ("Read(//srv/board/**)", "Bash(*/srv/board*)", "Bash(*.local/share/driftboard/token*)",
+                     "Edit(//var/helper/control/**)"):
+            self.assertIn(rule, held["deny"])
+        opened = claudePermissions(None, [], {"credentials": "ask"}, secrets, protected)
+        self.assertIn("Read(//srv/board/**)", opened["ask"])
+        self.assertIn("Edit(//var/helper/control/**)", opened["deny"])   # the user can open reading, not this
 
     def testTheConfigNamesWhatIsWrong(self):
         config = copy.deepcopy(DEFAULTS)
