@@ -473,7 +473,7 @@ const AGENT_COLUMN_NAMES = {
 };
 const agentColumn = (ws, column) => (AGENT_COLUMN_NAMES[column] || [])
   .map((name) => ws.binders.find((binder) => binder.title === name)).find(Boolean) || null;
-const CLOSED_COLUMNS = ['Done', "Won't do"];
+const CLOSED_COLUMNS = ['Done', "Won't do", 'Completed'];   // Completed: the starter board's own
 const AGENT_LIMITS = { progress: 300, question: 2000, result: 20000, content: 20000, text: 8000 };
 const CHAT_KEPT = 500; // the newest messages a card keeps
 

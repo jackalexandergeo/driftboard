@@ -98,6 +98,19 @@ test("an agent's columns are the board's own, whatever it calls them", async () 
   assert.equal(await columnOf(cardId, workspaceId), 'Proposed');
 });
 
+test("the starter board's Completed is closed too", async () => {
+  const workspace = (await call(board, 'POST', '/api/workspaces', { name: 'Starter style' }, board.token)).body;
+  const binders = {};
+  for (const title of ['In Progress', 'Completed']) {
+    binders[title] = (await call(board, 'POST', `/api/workspaces/${workspace.id}/binders`, { title }, board.token)).body.id;
+  }
+  const card = (await call(board, 'POST', `/api/workspaces/${workspace.id}/cards`, { title: 'Ship it', binderId: binders['In Progress'] },
+    board.token)).body;
+  const token = await agentFor(card.id);
+  await call(board, 'POST', `/api/cards/${card.id}/move`, { binderId: binders.Completed, toIndex: 0 }, board.token);
+  assert.equal((await call(board, 'PATCH', `/api/agent/cards/${card.id}`, { progress: 'still here' }, token)).status, 409);
+});
+
 test('only a holder of the board token mints a card token', async () => {
   const { cardId } = await newCard('Mint');
   assert.equal((await call(board, 'POST', `/api/cards/${cardId}/agent`, {})).status, 401);
