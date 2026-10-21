@@ -1,0 +1,29 @@
+// Card buttons a script sets: a press is recorded for the script; a button with `input`
+// asks the user for text first, and the press carries it. Run: npm test
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { call, startBoard, stopBoard } from './helpers.js';
+
+let board;
+
+before(async () => {
+  board = await startBoard(true);
+});
+
+after(() => stopBoard(board));
+
+test('a button that asks for text records the text with the press', async () => {
+  const { cardId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Talked about it in person' }, board.token)).body;
+  const buttons = [{ id: 'start', label: '▶ Start' },
+    { id: 'context', label: '＋ Context', input: 'What should the agent know?' }];
+  assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { buttons }, board.token)).status, 200);
+  const card = (await call(board, 'GET', `/api/cards/${cardId}`, undefined, board.token)).body.card;
+  assert.equal(card.buttons[1].input, 'What should the agent know?');
+  assert.equal((await call(board, 'POST', `/api/cards/${cardId}/press`, { button: 'context' }, board.token)).status, 400);
+  const pressed = await call(board, 'POST', `/api/cards/${cardId}/press`,
+    { button: 'context', text: '  We agreed to skip invoice 9.  ' }, board.token);
+  assert.deepEqual([pressed.status, pressed.body.pressed.button, pressed.body.pressed.text],
+    [200, 'context', 'We agreed to skip invoice 9.']);
+  const plain = await call(board, 'POST', `/api/cards/${cardId}/press`, { button: 'start', text: 'ignored' }, board.token);
+  assert.equal(plain.body.pressed.text, undefined);   // a plain button takes no text
+});

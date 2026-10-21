@@ -336,6 +336,11 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 @keyframes pop { 0% { transform: translateY(16px) scale(0.93); opacity: 0; } 60% { transform: translateY(-2px) scale(1.006); } 100% { transform: none; opacity: 1; } }
 .modal-tools { position: absolute; top: 14px; right: 14px; display: flex; gap: 2px; z-index: 2; }
 
+/* a card button's text dialog */
+.input-modal { max-width: 520px; }
+.input-title { margin: 0 0 12px; font-size: 16px; }
+.input-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
 /* binder editor */
 .binder-modal { max-width: 440px; padding: 0 26px 22px; overflow: hidden; }
 .binder-color-bar {

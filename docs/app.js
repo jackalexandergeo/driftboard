@@ -419,6 +419,32 @@ function cardAgentLine(card) {
 
 // The buttons a script put on the card. Pressing one only records it on the card; the script
 // that owns the card acts on it and clears it (until then the button waits, disabled).
+// A button with `input` asks for text first: what to tell the card's agent, say.
+function askForText(card, button) {
+  const overlay = $('input-overlay');
+  const text = $('input-text');
+  $('input-title').textContent = `${button.label} · ${card.title}`;
+  text.placeholder = button.input;
+  text.value = '';
+  overlay.classList.remove('hidden');
+  text.focus();
+  const close = () => { overlay.classList.add('hidden'); $('input-form').onsubmit = null; $('input-cancel').onclick = null; };
+  $('input-cancel').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  text.onkeydown = (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); close(); }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('input-form').requestSubmit();
+  };
+  $('input-form').onsubmit = async (e) => {
+    e.preventDefault();
+    if (!text.value.trim()) { text.focus(); return; }
+    $('input-send').disabled = true;
+    try { await api('POST', `/api/cards/${card.id}/press`, { button: button.id, text: text.value }); close(); await reloadWorkspace(); }
+    catch (err) { toast(err.message); }
+    finally { $('input-send').disabled = false; }
+  };
+}
+
 function cardButtons(card) {
   if (!(card.buttons || []).length) return null;
   const row = document.createElement('div');
@@ -432,6 +458,7 @@ function cardButtons(card) {
     let armed = null; // a button with `confirm` asks first: one click arms it, a second presses it
     b.addEventListener('click', async (e) => {
       e.stopPropagation(); // not a click on the card, which opens it
+      if (button.input) { askForText(card, button); return; }
       if (button.confirm && !armed) {
         b.textContent = button.confirm; b.classList.add('confirming');
         armed = setTimeout(() => { armed = null; b.textContent = button.label; b.classList.remove('confirming'); }, 4000);

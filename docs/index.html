@@ -124,6 +124,18 @@
     </div>
   </div>
 
+  <!-- A card button that asks for text first (e.g. context for the card's agent) -->
+  <div id="input-overlay" class="modal-overlay hidden">
+    <form class="modal input-modal" id="input-form" role="dialog" aria-modal="true">
+      <h3 id="input-title" class="input-title"></h3>
+      <textarea id="input-text" class="text-area" rows="6"></textarea>
+      <div class="input-actions">
+        <button type="button" class="btn-ghost" id="input-cancel">Cancel</button>
+        <button type="submit" class="btn-primary" id="input-send">Send</button>
+      </div>
+    </form>
+  </div>
+
   <!-- Binder editor modal -->
   <div id="binder-overlay" class="modal-overlay hidden">
     <div class="modal binder-modal" id="binder-modal" role="dialog" aria-modal="true">
