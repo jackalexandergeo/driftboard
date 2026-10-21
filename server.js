@@ -476,6 +476,17 @@ const agentColumn = (ws, column) => (AGENT_COLUMN_NAMES[column] || [])
 const CLOSED_COLUMNS = ['Done', "Won't do", 'Completed'];   // Completed: the starter board's own
 const AGENT_LIMITS = { progress: 300, question: 2000, result: 20000, content: 20000, text: 8000 };
 const CHAT_KEPT = 500; // the newest messages a card keeps
+const NOTES_KEPT = 200; // the newest notes items and agents put on a card; the user's own are all kept
+
+// A note an item (source) or an agent (by) puts on a card. Past NOTES_KEPT of those, the oldest go.
+function addNote(card, note) {
+  card.attachments.push({ id: randomUUID(), type: 'text', createdAt: now(), order: card.attachments.length, ...note });
+  const added = card.attachments.filter((a) => a.type === 'text' && (a.by || a.source));
+  if (added.length > NOTES_KEPT) {
+    const dropped = new Set(added.slice(0, added.length - NOTES_KEPT).map((a) => a.id));
+    card.attachments = card.attachments.filter((a) => !dropped.has(a.id));
+  }
+}
 
 // The card's conversation: the user and its agent, oldest first. A question is the agent asking,
 // a result the agent's answer; the rest is talk.
@@ -537,8 +548,7 @@ agentApi.post('/cards/:id/notes', (req, res) => {   // {content}
   const found = agentCard(req, res); if (!found) return;
   const content = agentText(req.body, 'content', res); if (content === null) return;
   const { card } = found;
-  card.attachments.push({ id: randomUUID(), type: 'text', content, by: card.agent.name, createdAt: now(),
-    order: card.attachments.length });
+  addNote(card, { content, by: card.agent.name });
   card.updatedAt = now();
   persist();
   res.status(201).json({ ok: true });
@@ -844,7 +854,7 @@ app.post('/api/items', (req, res) => {
       if (reopened) moveCard(ws, card, landing);
       const content = [reopened ? `_Reopened: a new item came in on this thread._` : '', `**${source}**: ${item.title.trim()}`,
         (item.body || '').trim()].filter(Boolean).join('\n\n');
-      card.attachments.push({ id: randomUUID(), type: 'text', content, createdAt: now(), order: card.attachments.length });
+      addNote(card, { content, source });
       if (item.link && !card.attachments.some((a) => a.type === 'url' && a.url === webURL(item.link.url))) {
         card.attachments.push({ id: randomUUID(), type: 'url', url: webURL(item.link.url), title: (item.link.title || '').trim(),
           createdAt: now(), order: card.attachments.length });

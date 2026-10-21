@@ -45,6 +45,18 @@ test('an agent keeps its own card current: progress, a note, its result', async 
   assert.deepEqual(card.attachments.map((attachment) => [attachment.content, attachment.by]), [['invoice 7 is in EUR', 'codex']]);
 });
 
+test("an agent's notes are capped at the newest 200; the user's own stay", async () => {
+  const { cardId } = await newCard('Chatty');
+  await call(board, 'POST', `/api/cards/${cardId}/attachments`, { type: 'text', content: 'my own note' }, board.token);
+  const token = await agentFor(cardId);
+  for (let number = 1; number <= 205; number += 1) {
+    await call(board, 'POST', `/api/agent/cards/${cardId}/notes`, { content: `note ${number}` }, token);
+  }
+  const notes = (await cardOf(cardId)).attachments.map((attachment) => attachment.content);
+  assert.equal(notes.length, 201);
+  assert.deepEqual([notes[0], notes[1], notes.at(-1)], ['my own note', 'note 6', 'note 205']);
+});
+
 test('asking moves the card to Needs you; going back to work clears the question', async () => {
   const { cardId, workspaceId } = await newCard('Which ledger?');
   const token = await agentFor(cardId);
