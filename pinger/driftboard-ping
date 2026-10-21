@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""driftboard-ping: put something on the board from anywhere: a script, a cron job, a hook.
+
+    driftboard-ping "Nightly build failed" --body "step test exited 1" --link https://ci.example/41
+    make test 2>&1 | tail -20 | driftboard-ping "Tests broke" --body - --source cron --thread nightly
+
+It is also the start of a pinger of your own (a chat watcher, a mail filter): copy this one
+file, watch what you watch, and call ping() for each thing worth a card. Standard library only.
+Items from one source in the same thread are one card (a later one joins it as a note), and the
+same --id sent twice is put on the board once.
+
+The board's token goes only to a server that first proves it holds it: another user can take
+the board's port while the board is down.
+"""
+
+import argparse
+import hashlib
+import hmac
+import json
+import os
+import secrets
+import sys
+import urllib.error
+import urllib.request
+
+DEFAULT_URL = "http://127.0.0.1:4321"
+
+
+class PingError(Exception):
+    def __init__(self, message, answer=None):
+        super().__init__(message)
+        self.answer = answer or {}
+
+
+def defaultTokenFile():
+    if os.environ.get("DRIFTBOARD_TOKEN_FILE"):
+        return os.environ["DRIFTBOARD_TOKEN_FILE"]
+    return os.path.join(os.environ.get("DRIFTBOARD_DATA") or os.path.expanduser("~/.local/share/driftboard"), "token")
+
+
+def readToken(path):
+    """The board's token, or None: a board with sign-in off takes items without one."""
+    try:
+        with open(os.path.expanduser(path)) as tokenFile:
+            return tokenFile.read().strip() or None
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise PingError("cannot read the board's token (%s): %s" % (path, error))
+
+
+def proveBoard(opener, url, token, timeout):
+    nonce = secrets.token_hex(16)
+    try:
+        with opener.open("%s/api/hello?nonce=%s" % (url, nonce), timeout=timeout) as response:
+            proof = json.loads(response.read() or b"null").get("proof")
+    except (OSError, ValueError, AttributeError) as error:
+        raise PingError("the board at %s did not answer: %s" % (url, error))
+    wanted = hmac.new(token.encode(), ("driftboard-hello:" + nonce).encode(), hashlib.sha256).hexdigest()
+    if not isinstance(proof, str) or not hmac.compare_digest(proof, wanted):
+        raise PingError("the server at %s could not prove it is the board; its token was not sent" % url)
+
+
+def refusal(status, answer, tokenPath, token):
+    if status == 401:
+        return ("the board wants its token: none at %s (set DRIFTBOARD_TOKEN_FILE)" % tokenPath if token is None
+                else "the board did not take the token in %s" % tokenPath)
+    why = "; ".join(answer.get("problems") or []) or answer.get("error") or "HTTP %d" % status
+    if answer.get("columns"):
+        why += " (its columns: %s)" % ", ".join(answer["columns"])
+    return "the board refused it: %s" % why
+
+
+def ping(title, body=None, source="ping", externalId=None, thread=None, link=None, linkTitle=None,
+         workspace=None, column=None, url=None, tokenFile=None, timeout=10):
+    """One item for the board. Returns its answer: {cardId, workspaceId} and created, joined or
+    duplicate. Raises PingError with what went wrong."""
+    item = {"source": source, "title": title}
+    for key, value in (("body", body), ("externalId", externalId), ("thread", thread),
+                       ("workspace", workspace), ("column", column)):
+        if value:
+            item[key] = value
+    if link:
+        item["link"] = dict({"url": link}, **({"title": linkTitle} if linkTitle else {}))
+    url = (url or os.environ.get("DRIFTBOARD_URL") or DEFAULT_URL).rstrip("/")
+    tokenPath = tokenFile or defaultTokenFile()
+    token = readToken(tokenPath)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # straight to the board, whatever proxy is set
+    headers = {"Content-Type": "application/json"}
+    if token:
+        proveBoard(opener, url, token, timeout)
+        headers["Authorization"] = "Bearer " + token
+    request = urllib.request.Request(url + "/api/items", data=json.dumps(item).encode(), method="POST", headers=headers)
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        try:
+            answer = json.loads(error.read() or b"null") or {}
+        except ValueError:
+            answer = {}
+        raise PingError(refusal(error.code, answer, tokenPath, token), answer)
+    except (OSError, ValueError) as error:
+        raise PingError("the board at %s did not answer: %s" % (url, error))
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="driftboard-ping",
+                                     description="Put an item on the board: a new card, or a note on its thread's card.")
+    parser.add_argument("title", help="the card's title")
+    parser.add_argument("--body", help="markdown for the card; - reads it from stdin")
+    parser.add_argument("--source", default=os.environ.get("DRIFTBOARD_SOURCE", "ping"),
+                        help="who sends it: lowercase letters, digits, . _ - (default: ping)")
+    parser.add_argument("--id", dest="externalId", help="your own id for it: sent again, it is not put on twice")
+    parser.add_argument("--thread", help="items in one thread are one card: a later one joins it as a note")
+    parser.add_argument("--link", help="an http or https link to attach")
+    parser.add_argument("--link-title", help="the link's title")
+    parser.add_argument("--board", dest="workspace", help="which board, by name (default: Inbox)")
+    parser.add_argument("--column", help="which column, by title (default: the first)")
+    parser.add_argument("--url", help="the board (default: $DRIFTBOARD_URL or %s)" % DEFAULT_URL)
+    parser.add_argument("--token-file", help="the board's token (default: $DRIFTBOARD_TOKEN_FILE, else "
+                                             "$DRIFTBOARD_DATA/token, else ~/.local/share/driftboard/token)")
+    parser.add_argument("--json", action="store_true", help="print the board's answer as JSON")
+    arguments = parser.parse_args(argv)
+    body = sys.stdin.read() if arguments.body == "-" else arguments.body
+    try:
+        answer = ping(arguments.title, body, arguments.source, arguments.externalId, arguments.thread, arguments.link,
+                      arguments.link_title, arguments.workspace, arguments.column, arguments.url, arguments.token_file)
+    except PingError as error:
+        print("driftboard-ping: %s" % error, file=sys.stderr)
+        return 1
+    if arguments.json:
+        print(json.dumps(answer))
+    elif answer.get("joined"):
+        print("joined card %s" % answer["cardId"])
+    elif answer.get("duplicate"):
+        print("already on the board: card %s" % answer["cardId"])
+    else:
+        print("new card %s" % answer["cardId"])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -235,6 +235,23 @@ It answers `201` with `{cardId, workspaceId, created: true}` for a new card, and
 `duplicate` or `joined` otherwise. With sign-in off (`DRIFTBOARD_SIGN_IN=off`) the token
 header is not needed. Tests: `npm test`.
 
+### The pinger
+
+`pinger/driftboard-ping` does that call for you, from a terminal, a cron job or a hook, and it
+sends the token only to a server that proves it is the board:
+
+```sh
+pinger/driftboard-ping "Nightly build failed" --body "step test exited 1" --link https://ci.example/41
+make test 2>&1 | tail -20 | pinger/driftboard-ping "Tests broke" --body - --source cron --thread nightly
+pinger/driftboard-ping --help              # --id, --thread, --board, --column, --url, --token-file
+```
+
+It is one Python file with no dependencies, so it is also where a pinger of your own starts:
+copy it, watch what you watch (a chat, a mailbox, a log), and call `ping(title, body, ...)` for
+each thing worth a card. It reads the token from `$DRIFTBOARD_TOKEN_FILE`, else
+`$DRIFTBOARD_DATA/token`, else `~/.local/share/driftboard/token`, and the board from
+`$DRIFTBOARD_URL` (default `http://127.0.0.1:4321`). Tests: `npm run test:helper`.
+
 ## 🤖 Put an AI agent on a card
 
 `helper/` starts **Claude Code** or **Codex** on a card when you press ▶ Start, and the card
