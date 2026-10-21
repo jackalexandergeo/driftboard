@@ -109,7 +109,23 @@ function showLocked() {
   keepToken(null);   // a token the board refused is no use after a refresh either
   locked = true;
   $('locked').classList.remove('hidden');
+  $('locked').append($('pin-form'));   // the one PIN form, wherever sign-in is offered
   offerPin();
+}
+// A new sign-in (a PIN, a link, another tab): carry on with it, locked or away before.
+function signedInAgain() {
+  locked = false;
+  $('locked').classList.add('hidden');
+  if (away) {
+    away = false;
+    clearInterval(awayTimer);
+    $('away').classList.add('hidden');
+    $('away-sign-in').classList.add('hidden');
+  }
+  if (!ws) { start(); return; }
+  changedElsewhere = true;
+  checkForChanges().catch(() => {});
+  openLinkedCard();
 }
 
 // While the board is down, any user of this machine can listen on its port, and a call from
@@ -138,7 +154,10 @@ async function askForProof() {
     if (res.ok) proof = (await res.json()).proof;
   } catch { /* not reached, or not the board's answer */ }
   if (proof !== expected) {
-    throw Object.assign(new Error('the server at this address could not prove it is this board, so it was not sent anything'), { status: 0 });
+    // mismatch: something answered with a proof, but not for this token. Another program, or
+    // the board itself with a new token (its data folder was replaced or moved).
+    throw Object.assign(new Error('the server at this address could not prove it is this board, so it was not sent anything'),
+      { status: 0, mismatch: typeof proof === 'string' });
   }
 }
 
@@ -148,18 +167,27 @@ async function askForProof() {
 const AWAY_RETRY = 3000;
 let awayTimer = null;
 const awayError = () => Object.assign(new Error('the board went away: nothing is sent until it is back'), { status: 0, away: true });
-function goAway() {
+function goAway(mismatch) {
+  if (mismatch) offerSignInAgain();
   if (away) return;
   away = true;
   $('away').classList.remove('hidden');
   awayTimer = setInterval(comeBack, AWAY_RETRY);
 }
+// The board answers but not to this browser's token: if its token changed, only a new sign-in
+// helps, so it is offered next to the waiting (which carries on, for an impostor that goes away).
+function offerSignInAgain() {
+  $('away-sign-in').classList.remove('hidden');
+  $('away-sign-in').append($('pin-form'));
+  offerPin();
+}
 async function comeBack() {
-  try { await proveServer(); } catch { return; }
+  try { await proveServer(); } catch (e) { if (e.mismatch) offerSignInAgain(); return; }
   if (!away) return;
   away = false;
   clearInterval(awayTimer);
   $('away').classList.add('hidden');
+  $('away-sign-in').classList.add('hidden');
   if (!ws) { start(); return; } // it went away before the board was first drawn
   changedElsewhere = true; // whatever changed meanwhile
   checkForChanges().catch(() => {});
@@ -178,8 +206,8 @@ async function request(method, url, body, isForm) {
     if (DEMO) return { data: await window.DriftboardDemo.handle(method, url, body, isForm), revision: null }; // browser backend, same shapes
     if (!token && !signInOff) { showLocked(); throw Object.assign(new Error('this board is locked: open it with `npm run open`'), { status: 401 }); }
     if (away) throw awayError();
-    try { await proveServer(); } catch { goAway(); throw awayError(); }
-    if (token) opts.headers.Authorization = `Bearer ${token}`;
+    try { await proveServer(); } catch (e) { goAway(e.mismatch); throw awayError(); }
+    if (token && !signInOff) opts.headers.Authorization = `Bearer ${token}`;   // with sign-in off nothing proved the board
     let res;
     try { res = await fetch(url, opts); } catch { goAway(); throw awayError(); }
     if (res.status === 401) { goAway(); throw awayError(); }
@@ -1554,17 +1582,21 @@ function forgetLink() {
   history.replaceState(history.state, '', location.pathname + location.search);
 }
 // A sign-in link put into a tab already at this address changes only the fragment: no reload.
+// Its token replaces the one this tab had (which may be one the board no longer holds).
 window.addEventListener('hashchange', async () => {
   const code = takeSignInCode();
-  if (code && !token) {
+  if (code) {
+    const before = token;
     await signInWithCode(code);
-    if (!token) return;
-    locked = false;
-    $('locked').classList.add('hidden');
-    start();
-    return;
+    if (token && token !== before) { signedInAgain(); return; }
   }
   openLinkedCard();
+});
+// Another tab at this address signed in (or found its token refused): this one follows.
+window.addEventListener('storage', (e) => {
+  if (e.key !== TOKEN_KEY || e.newValue === token || signInOff) return;
+  token = e.newValue;
+  if (token && (locked || away)) signedInAgain();
 });
 
 // ---------- PIN sign-in ----------
@@ -1593,9 +1625,7 @@ $('pin-form').addEventListener('submit', async (e) => {
   }
   $('pin-error').textContent = '';
   keepToken(body.token);
-  locked = false;
-  $('locked').classList.add('hidden');
-  start();
+  signedInAgain();
 });
 
 // ---------- go ----------
@@ -1607,5 +1637,6 @@ async function checkSignIn() {
   const res = await fetch('/api/sign-in', { cache: 'no-store' }).catch(() => null);
   const body = res && res.ok ? await res.json().catch(() => null) : null;
   signInOff = body?.required === false;
+  if (signInOff && token) keepToken(null);   // never sent while sign-in is off; dropped, so nothing can ask for it later
 }
 checkSignIn().then(() => (signInOff ? takeSignInCode() : signInWithCode(takeSignInCode()))).then(start);

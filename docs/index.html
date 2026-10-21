@@ -73,6 +73,12 @@
       <p>It stopped, or another program answers at this address and could not prove it is
         this board. This page sends it nothing, and stopped looking for changes. It tries
         again every few seconds and carries on once the board is back.</p>
+      <div id="away-sign-in" class="hidden">
+        <p>Something answers here, but not to this browser's sign-in. If the board's token
+          changed (its data folder was replaced, or <code>DRIFTBOARD_DATA</code> points
+          elsewhere now), sign in again: <code>npm run open</code> from a terminal on the
+          machine it runs on, or your PIN.</p>
+      </div>
     </div>
 
     <div class="canvas-hint" id="canvas-hint">Scroll to pan · ⌘/Ctrl + scroll to zoom · drag empty space to move around</div>
