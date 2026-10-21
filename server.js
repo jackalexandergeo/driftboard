@@ -412,9 +412,9 @@ const CHAT_KEPT = 500; // the newest messages a card keeps
 
 // The card's conversation: the user and its agent, oldest first. A question is the agent asking,
 // a result the agent's answer; the rest is talk.
-function addChat(card, from, text, kind) {
+function addChat(card, from, text, kind, images) {
   const message = { id: randomUUID(), from, text, at: now(), ...(kind ? { kind } : {}),
-    ...(from === 'agent' && card.agent?.name ? { name: card.agent.name } : {}) };
+    ...(from === 'agent' && card.agent?.name ? { name: card.agent.name } : {}), ...(images?.length ? { images } : {}) };
   card.chat = [...(card.chat || []), message].slice(-CHAT_KEPT);
   return message;
 }
@@ -793,14 +793,31 @@ app.post('/api/items', (req, res) => {
   res.status(201).json({ cardId: card.id, workspaceId: ws.id, created: true });
 });
 
-// The user writes to the card's agent (from the open card, or a script on their behalf).
+// The user writes to the card's agent (from the open card, or a script on their behalf), with
+// pictures already uploaded to the card: {text, images?: [attachment id]}. Only the kinds of
+// picture an agent can look at.
+const CHAT_IMAGES = 8;
+const CHAT_IMAGE_TYPES = /^image\/(png|jpeg|gif|webp)$/;
 app.post('/api/cards/:id/chat', (req, res) => {
   const found = getCard(req.params.id);
   if (!found) return res.status(404).json({ error: 'card not found' });
   const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-  if (!text) return res.status(400).json({ error: 'text is required' });
+  const wanted = req.body?.images ?? [];
+  if (!Array.isArray(wanted) || wanted.length > CHAT_IMAGES || !wanted.every((id) => typeof id === 'string')) {
+    return res.status(400).json({ error: `images must be a list of at most ${CHAT_IMAGES} attachment ids` });
+  }
+  const images = [];
+  for (const id of new Set(wanted)) {
+    const attachment = found.card.attachments.find((each) => each.id === id);
+    if (!attachment?.filename || !CHAT_IMAGE_TYPES.test(attachment.mimeType || '')) {
+      return res.status(400).json({ error: `${id} is not a png, jpeg, gif or webp picture on this card` });
+    }
+    images.push({ id: attachment.id, filename: attachment.filename, mimeType: attachment.mimeType,
+      name: attachment.originalName || '' });
+  }
+  if (!text && !images.length) return res.status(400).json({ error: 'text or a picture is required' });
   if (text.length > AGENT_LIMITS.text) return res.status(400).json({ error: `text is longer than ${AGENT_LIMITS.text} characters` });
-  const message = addChat(found.card, 'user', text);
+  const message = addChat(found.card, 'user', text, undefined, images);
   found.card.updatedAt = now();
   persist();
   res.status(201).json(message);

@@ -32,3 +32,23 @@ test('each side writes only as itself', async () => {
   assert.equal((await call(board, 'POST', `/api/agent/cards/${cardId}/chat`, { text: 'x' }, board.token)).status, 401);
   assert.equal((await call(board, 'POST', `/api/cards/${cardId}/chat`, { text: '  ' }, board.token)).status, 400);
 });
+
+test('pictures on the card go with a message, with or without text; other files do not', async () => {
+  const { cardId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Look at this' }, board.token)).body;
+  const upload = async (name, type) => {
+    const form = new FormData();
+    form.append('file', new Blob([Buffer.from('not really a picture')], { type }), name);
+    const response = await fetch(`${board.url}/api/cards/${cardId}/attachments`, {
+      method: 'POST', headers: { Authorization: `Bearer ${board.token}` }, body: form });
+    return (await response.json()).id;
+  };
+  const screenshot = await upload('screenshot.png', 'image/png');
+  const drawing = await upload('drawing.svg', 'image/svg+xml');
+  const sent = await call(board, 'POST', `/api/cards/${cardId}/chat`, { text: '', images: [screenshot] }, board.token);
+  assert.equal(sent.status, 201);
+  assert.deepEqual(sent.body.images.map((image) => [image.id, image.mimeType, image.name]), [[screenshot, 'image/png', 'screenshot.png']]);
+  assert.match(sent.body.images[0].filename, /^[0-9a-f-]{36}\.png$/);
+  for (const images of [[drawing], ['no-such-attachment'], 'not a list', Array(9).fill(screenshot)]) {
+    assert.equal((await call(board, 'POST', `/api/cards/${cardId}/chat`, { text: 'x', images }, board.token)).status, 400);
+  }
+});
