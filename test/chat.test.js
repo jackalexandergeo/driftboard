@@ -44,6 +44,11 @@ test('the page loads pictures only from the board itself', async () => {
   assert.match(policy, /img-src 'self' data: blob:/);
 });
 
+test('an API call the board does not have is answered in JSON', async () => {
+  const { status, body } = await call(board, 'GET', '/api/no-such-call?x=1', undefined, board.token);
+  assert.deepEqual([status, body.error], [404, 'this board has no GET /api/no-such-call']);
+});
+
 test('each side writes only as itself', async () => {
   const { cardId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Who says what' }, board.token)).body;
   const token = (await call(board, 'POST', `/api/cards/${cardId}/agent`, {}, board.token)).body.token;

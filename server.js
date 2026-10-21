@@ -1192,6 +1192,12 @@ app.delete('/api/cards/:id/attachments/:attId', async (req, res) => {
   res.json({ ok: true });
 });
 
+// An API call the board does not have is a JSON answer like any other, not a page: a client
+// (an older page, a script written for a newer board) can tell it from a board that went away.
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `this board has no ${req.method} ${req.originalUrl.split('?')[0]}` });
+});
+
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(400).json({ error: err.message || 'request failed' });
