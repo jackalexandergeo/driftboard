@@ -25,6 +25,17 @@ test('the user and the agent talk on the card, the agent asking and answering in
     ['agent', 'question', 'Include credit notes?', 'claude'], ['agent', 'result', '**2 mismatches**', 'claude']]);
 });
 
+test('a script offers the chat on a card with chat: true, kept as chatEnabled beside the messages', async () => {
+  const { cardId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Chat here' }, board.token)).body;
+  assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { chat: 'yes' }, board.token)).status, 400);
+  const offered = (await call(board, 'PATCH', `/api/cards/${cardId}`, { chat: true }, board.token)).body;
+  assert.equal(offered.chatEnabled, true);
+  await call(board, 'POST', `/api/cards/${cardId}/chat`, { text: 'hello' }, board.token);
+  const card = (await call(board, 'GET', `/api/cards/${cardId}`, undefined, board.token)).body.card;
+  assert.deepEqual([card.chatEnabled, card.chat.map((message) => message.text)], [true, ['hello']]);
+  assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { chat: false }, board.token)).body.chatEnabled, undefined);
+});
+
 test('each side writes only as itself', async () => {
   const { cardId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Who says what' }, board.token)).body;
   const token = (await call(board, 'POST', `/api/cards/${cardId}/agent`, {}, board.token)).body.token;
