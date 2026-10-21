@@ -12,6 +12,8 @@ import { DATA_DIR, HOST, LEGACY_DATA_DIR, OPENING_DIR, PIN_FILE, PORT, SIGN_IN, 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const BOARD_FILE = path.join(DATA_DIR, 'board.json');
+const BOARD_TEMP_FILE = `${BOARD_FILE}.tmp`;
+const BOARD_BACKUP_FILE = `${BOARD_FILE}.bak`; // the copy before the last write
 
 const STARTER_BINDERS = ['To Do', 'In Progress', 'Blocked', 'Reviewing', 'Completed'];
 const STAGE_TITLES = {
@@ -88,17 +90,51 @@ function migrateV1(old) {
   return { version: 2, activeWorkspaceId: ws.id, workspaces: [ws] };
 }
 
-let state = defaultState();
-try {
-  const raw = JSON.parse(fs.readFileSync(BOARD_FILE, 'utf8'));
-  if (Array.isArray(raw.workspaces)) {
-    state = raw;
-  } else if (Array.isArray(raw.cards)) {
-    state = migrateV1(raw); // v1 board.json
-  }
-} catch {
-  // no board yet — start fresh
+function readBoard(file) {
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (Array.isArray(raw?.workspaces)) return raw;
+  if (Array.isArray(raw?.cards)) return migrateV1(raw); // v1 board.json
+  throw new Error('it holds no board');
 }
+
+// The board never starts empty over one that is there. A board.json that cannot be read is moved
+// aside for the last good copy; with no good copy the board does not start. board.json missing
+// while a write was being finished: the written temporary file, else the last good copy.
+function loadState() {
+  let unreadable = null;
+  if (fs.existsSync(BOARD_FILE)) {
+    try { return readBoard(BOARD_FILE); } catch (error) { unreadable = error.message; }
+  } else if (fs.existsSync(BOARD_TEMP_FILE)) {
+    try {
+      const written = readBoard(BOARD_TEMP_FILE);
+      console.error(`${BOARD_FILE} was missing: the board starts from the last write, ${BOARD_TEMP_FILE}`);
+      return written;
+    } catch { /* a write cut short: the last good copy below */ }
+  }
+  if (fs.existsSync(BOARD_BACKUP_FILE)) {
+    try {
+      const saved = readBoard(BOARD_BACKUP_FILE);
+      if (unreadable) {
+        const aside = `${BOARD_FILE}.unreadable-${Date.now()}`;
+        fs.renameSync(BOARD_FILE, aside);
+        console.error(`${BOARD_FILE} could not be read (${unreadable}): it is now ${aside}, and the board starts `
+          + `from the last good copy, ${BOARD_BACKUP_FILE}`);
+      } else {
+        console.error(`${BOARD_FILE} was missing: the board starts from the last good copy, ${BOARD_BACKUP_FILE}`);
+      }
+      return saved;
+    } catch (error) {
+      unreadable ??= `it is missing, and ${BOARD_BACKUP_FILE} could not be read either (${error.message})`;
+    }
+  }
+  if (unreadable) {
+    console.error(`${BOARD_FILE} could not be read (${unreadable}), and there is no good copy to start from: the `
+      + 'board did not start. Fix the file, or move it away to start a new board.');
+    process.exit(1);
+  }
+  return defaultState(); // no board yet
+}
+let state = loadState();
 if (!Array.isArray(state.trash)) state.trash = []; // undo history for deleted cards/binders
 const TRASH_CAP = 40;
 
@@ -106,16 +142,46 @@ const TRASH_CAP = 40;
 // board. It starts from the clock so a restart never repeats an earlier number.
 let revision = Date.now();
 
-// Serialize writes so overlapping requests can't corrupt the file.
-let writeChain = Promise.resolve();
+// Each change is written soon after, the whole board at once. One write at a time: changes made
+// while it is under way are taken by the next one, so a burst of items or reports is one or two
+// writes, not one each. A write goes to a temporary file, is flushed to the disk, and replaces
+// board.json, whose previous copy is kept as board.json.bak.
+let writing = null;
+let dirty = false;
 function persist() {
   revision += 1;
-  writeChain = writeChain.then(async () => {
-    const tmp = BOARD_FILE + '.tmp';
-    await fsp.writeFile(tmp, JSON.stringify(state, null, 2));
-    await fsp.rename(tmp, BOARD_FILE);
-  }).catch((err) => console.error('persist failed:', err));
-  return writeChain;
+  dirty = true;
+  if (!writing) writing = writeBoard();
+  return writing;
+}
+async function writeBoard() {
+  try {
+    while (dirty) {
+      await new Promise((resolve) => setImmediate(resolve)); // the rest of this burst first
+      dirty = false;
+      try {
+        const file = await fsp.open(BOARD_TEMP_FILE, 'w', 0o600);
+        try {
+          await file.writeFile(JSON.stringify(state));
+          await file.sync();
+        } finally {
+          await file.close();
+        }
+        await fsp.rename(BOARD_FILE, BOARD_BACKUP_FILE).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+        await fsp.rename(BOARD_TEMP_FILE, BOARD_FILE);
+        const folder = await fsp.open(DATA_DIR, 'r');   // the renames too
+        await folder.sync().catch(() => {}).finally(() => folder.close());
+      } catch (error) {
+        console.error('persist failed:', error);
+      }
+    }
+  } finally {
+    writing = null; // at once when nothing is left: a change from now on starts the next write
+  }
+}
+// Stopped (systemd, Ctrl-C): the last changes are written first.
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.once(signal, () => { Promise.resolve(writing).finally(() => process.exit(0)); });
 }
 
 // --- Lookup helpers --------------------------------------------------------

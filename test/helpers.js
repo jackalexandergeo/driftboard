@@ -17,8 +17,12 @@ function freePort() {
   });
 }
 
-export async function startBoard(signIn) {
-  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'driftboard-test-'));
+export function newDataFolder() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'driftboard-test-'));
+}
+
+// data: a folder made with newDataFolder() and filled by the test.
+export async function startBoard(signIn, { data = newDataFolder() } = {}) {
   const port = await freePort();
   const server = spawn(process.execPath, [path.join(root, 'server.js')], {
     env: { ...process.env, PORT: String(port), DRIFTBOARD_DATA: data, DRIFTBOARD_SIGN_IN: signIn ? 'on' : 'off' },
