@@ -14,7 +14,7 @@ class AccessTest(unittest.TestCase):
         opened = claudePermissions({"ssh": "ask", "rsync": "allow"})
         self.assertNotIn("Bash(ssh *)", opened["deny"])
         self.assertIn("Bash(ssh *)", opened["ask"])
-        self.assertEqual(opened["allow"], ["Bash(rsync *:*)"])
+        self.assertEqual(opened["allow"], ["Bash(rsync *)"])
 
     def testAnyCommandTheUserNamesIsDeniedAskedOrAllowedLikewise(self):
         # A site's own CLI: every use waits for the user's yes.

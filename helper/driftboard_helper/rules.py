@@ -46,7 +46,7 @@ PUSHES = ["Bash(git *push*)", "Bash(git *send-pack*)"]
 # Commands that reach other machines: denied unless the user opens them, one by one. The user may
 # name any other command too (a site's own CLI, say): it is then denied, asked or allowed likewise.
 ACCESS_COMMANDS = {"ssh": ["Bash(ssh *)"], "scp": ["Bash(scp *)"], "sftp": ["Bash(sftp *)"], "sshfs": ["Bash(sshfs *)"],
-                   "rsync": ["Bash(rsync *:*)"]}
+                   "rsync": ["Bash(rsync *)"]}   # any rsync: a trailing :* would be read as a literal prefix
 ACCESS_LEVELS = ("deny", "ask", "allow")
 COMMAND_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 
