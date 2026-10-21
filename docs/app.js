@@ -1040,6 +1040,7 @@ function chatMessageEl(message) {
   return row;
 }
 function renderChat(card) {
+  renderStartInTerminal(card);
   const chat = chatOf(card);
   const show = chat.length > 0 || !!card.agent || chatOptedIn(card);
   $('chat-section').classList.toggle('hidden', !show);
@@ -1642,6 +1643,29 @@ async function showTerminal(card) {
   socket.addEventListener('close', () => { if (terminal?.socket === socket && !ended) status('disconnected (the agent keeps running): close it, or open it again'); });
 }
 $('terminal-close').addEventListener('click', closeTerminal);
+// A card whose agent has not started: start it and open its terminal at once.
+function renderStartInTerminal(card) {
+  const actions = $('chat-actions');
+  actions.innerHTML = '';
+  if (DEMO || !(card.buttons || []).some((button) => button.id === 'start')) return;
+  const button = document.createElement('button');
+  button.className = 'card-button'; button.type = 'button'; button.textContent = '⌨ Start in a terminal';
+  button.title = "Start the agent and open its session here, to watch it work and type to it";
+  button.addEventListener('click', () => startInTerminal(card, button));
+  actions.append(button);
+}
+async function startInTerminal(card, button) {
+  button.disabled = true; button.textContent = 'Starting…';
+  try { await api('POST', `/api/cards/${card.id}/press`, { button: 'start' }); }
+  catch (error) { toast(error.message); button.disabled = false; button.textContent = '⌨ Start in a terminal'; return; }
+  for (const deadline = Date.now() + 90000; Date.now() < deadline;) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    if (currentCardId !== card.id) return;   // the user moved on: the card's own ⌨ Terminal is there later
+    const fresh = (await api('GET', `/api/cards/${card.id}`)).card;
+    if (fresh.terminalEnabled) { await reloadWorkspace(); showTerminal(fresh); return; }
+  }
+  toast('The agent started, but its terminal did not come up: try ⌨ Terminal in the card, or check the helper');
+}
 
 // ---------- live updates ----------
 // Another tab or a script may change the board. Each response carries the board's revision.
