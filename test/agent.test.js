@@ -57,6 +57,16 @@ test("an agent's notes are capped at the newest 200; the user's own stay", async
   assert.deepEqual([notes[0], notes[1], notes.at(-1)], ['my own note', 'note 6', 'note 205']);
 });
 
+test('a long result in any script arrives whole, however the client encodes it', async () => {
+  const { cardId } = await newCard('In Japanese');
+  const token = await agentFor(cardId);
+  const escaped = `{"result": "${'\\u3042'.repeat(20000)}"}`;   // 120 kB, as a client that escapes non-ASCII sends it
+  const response = await fetch(`${board.url}/api/agent/cards/${cardId}`, { method: 'PATCH', body: escaped,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } });
+  assert.equal(response.status, 200);
+  assert.equal((await cardOf(cardId)).agent.result, 'あ'.repeat(20000));
+});
+
 test('asking moves the card to Needs you; going back to work clears the question', async () => {
   const { cardId, workspaceId } = await newCard('Which ledger?');
   const token = await agentFor(cardId);

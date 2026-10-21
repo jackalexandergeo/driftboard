@@ -529,7 +529,9 @@ function moveCard(ws, card, binder) {
 }
 
 const agentApi = express.Router();
-agentApi.use(express.json({ limit: '64kb' }));
+// Room for the longest text (20000 characters) however it is sent: UTF-8 takes up to 4 bytes a
+// character, and an escaped \uXXXX 6.
+agentApi.use(express.json({ limit: '256kb' }));
 agentApi.patch('/cards/:id', (req, res) => {   // {progress?, result?}
   const found = agentCard(req, res); if (!found) return;
   const { card } = found;
