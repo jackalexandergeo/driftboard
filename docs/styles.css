@@ -478,13 +478,17 @@ body.att-reordering { cursor: grabbing; user-select: none; -webkit-user-select: 
 .popup-menu button.danger { color: var(--red); }
 .popup-menu button.danger:hover { background: rgba(210,20,25,0.1); }
 
-.toast {
-  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
-  background: var(--text); color: var(--bg); padding: 10px 12px 10px 18px; border-radius: 10px;
-  font-size: 13px; z-index: 200; box-shadow: var(--shadow-md);
-  display: flex; align-items: center; gap: 14px; animation: toastUp 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
+#toasts {
+  position: fixed; top: 66px; right: 16px; z-index: 200;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  max-width: min(420px, calc(100vw - 32px)); pointer-events: none;
 }
-@keyframes toastUp { from { transform: translate(-50%, 16px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+.toast {
+  background: var(--text); color: var(--bg); padding: 10px 12px 10px 18px; border-radius: 10px;
+  font-size: 13px; box-shadow: var(--shadow-md); pointer-events: auto;
+  display: flex; align-items: center; gap: 14px; animation: toastIn 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+@keyframes toastIn { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
 .toast button { background: none; border: none; color: var(--orange); font: inherit; font-weight: 700; cursor: pointer; padding: 2px 6px; border-radius: 6px; }
 .toast button:hover { background: rgba(231,97,37,0.18); }
 

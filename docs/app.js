@@ -228,11 +228,17 @@ async function api(method, url, body, isForm) {
 
 // ---------- utils ----------
 const currentCard = () => ws && ws.cards.find((c) => c.id === currentCardId);
+// Messages stack in the top right, under the header, clear of the toolbar at the bottom.
+function toastShelf() {
+  let shelf = document.getElementById('toasts');
+  if (!shelf) { shelf = document.createElement('div'); shelf.id = 'toasts'; document.body.appendChild(shelf); }
+  return shelf;
+}
 function toast(msg) {
   const el = document.createElement('div');
   el.className = 'toast';
   el.textContent = msg;
-  document.body.appendChild(el);
+  toastShelf().appendChild(el);
   setTimeout(() => el.remove(), 2600);
 }
 function toastAction(msg, label, fn) {
@@ -241,7 +247,7 @@ function toastAction(msg, label, fn) {
   const s = document.createElement('span'); s.textContent = msg; el.appendChild(s);
   const b = document.createElement('button'); b.textContent = label;
   b.addEventListener('click', () => { el.remove(); fn(); }); el.appendChild(b);
-  document.body.appendChild(el);
+  toastShelf().appendChild(el);
   setTimeout(() => el.remove(), 6000);
 }
 // Every value that goes into HTML, as text or in an attribute, goes through this first.
