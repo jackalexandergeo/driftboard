@@ -868,65 +868,76 @@ function renderAgent(card) {
   const state = agent.stoppedAt ? `stopped ${shortDate(agent.stoppedAt)}` : `since ${shortDate(agent.startedAt)}`;
   $('agent-head').textContent = `Agent: ${agent.name || 'agent'} · ${state}`;
   // The chat shows questions and results as they come; here only what a card from before chat had.
-  const said = (kind) => (card.chat || []).some((message) => message.kind === kind);
+  const said = (kind) => chatOf(card).some((message) => message.kind === kind);
   const question = agent.question && !said('question') ? agent.question : '';
   $('agent-question').classList.toggle('hidden', !question);
   $('agent-question').textContent = question ? `Needs you: ${question}` : '';
-  $('agent-progress').textContent = card.chat?.length ? '' : agent.progress || '';   // by the chat, when there is one
+  $('agent-progress').textContent = chatOf(card).length ? '' : agent.progress || '';   // by the chat, when there is one
   $('agent-result').innerHTML = agent.result && !said('result') ? renderMarkdown(agent.result) : '';
 }
 
 // The card's conversation with its agent, like a chat: yours on the right, the agent's on the
 // left (markdown), its questions marked. What you send here reaches the agent through the helper.
+const chatOf = (card) => (Array.isArray(card.chat) ? card.chat : []);
+// What the thread shows: whose card, and the ids of the messages drawn, in order. Messages are
+// never edited, so while they are the first ones of the card's chat only the newer ones are added.
+let drawnChat = { cardId: null, ids: [] };
+function chatMessageEl(message) {
+  const row = document.createElement('div');
+  row.className = `chat-msg ${message.from === 'user' ? 'user' : 'agent'}${message.kind ? ` ${message.kind}` : ''}`;
+  const meta = document.createElement('div');
+  meta.className = 'chat-meta';
+  const who = message.from === 'user' ? 'You' : (message.name || 'agent');
+  const what = message.kind === 'question' ? ' asks' : message.kind === 'result' ? ' · result' : '';
+  meta.textContent = `${who}${what} · ${shortDate(message.at)}`;
+  row.append(meta);
+  if (message.text) {
+    const body = document.createElement('div');
+    if (message.from === 'user') { body.className = 'chat-body plain'; body.textContent = message.text; }
+    else { body.className = 'chat-body markdown'; body.innerHTML = renderMarkdown(message.text); }
+    row.append(body);
+  }
+  if (message.images?.length) {
+    const pictures = document.createElement('div');
+    pictures.className = 'chat-pictures';
+    for (const image of message.images) {
+      const link = document.createElement('a');
+      link.href = fileUrl(image); link.target = '_blank'; link.rel = 'noopener';
+      const img = document.createElement('img');
+      img.src = fileUrl(image); img.alt = image.name || 'picture'; img.loading = 'lazy';
+      link.append(img);
+      pictures.append(link);
+    }
+    row.append(pictures);
+  }
+  return row;
+}
 function renderChat(card) {
-  const chat = card.chat || [];
+  const chat = chatOf(card);
   const show = chat.length > 0 || !!card.agent || (card.buttons || []).some((button) => ['start', 'reply', 'context'].includes(button.id));
   $('chat-section').classList.toggle('hidden', !show);
-  if (!show) return;
+  if (!show) { drawnChat = { cardId: null, ids: [] }; return; }
   const thread = $('chat-thread');
-  const sameCard = thread.dataset.card === card.id;
+  const sameCard = drawnChat.cardId === card.id;
   const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 32;
-  thread.innerHTML = '';
-  for (const message of chat) {
-    const row = document.createElement('div');
-    row.className = `chat-msg ${message.from === 'user' ? 'user' : 'agent'}${message.kind ? ` ${message.kind}` : ''}`;
-    const meta = document.createElement('div');
-    meta.className = 'chat-meta';
-    const who = message.from === 'user' ? 'You' : (message.name || 'agent');
-    const what = message.kind === 'question' ? ' asks' : message.kind === 'result' ? ' · result' : '';
-    meta.textContent = `${who}${what} · ${shortDate(message.at)}`;
-    row.append(meta);
-    if (message.text) {
-      const body = document.createElement('div');
-      if (message.from === 'user') { body.className = 'chat-body plain'; body.textContent = message.text; }
-      else { body.className = 'chat-body markdown'; body.innerHTML = renderMarkdown(message.text); }
-      row.append(body);
+  const ids = chat.map((message) => message.id);
+  const appending = sameCard && drawnChat.ids.length > 0 && drawnChat.ids.every((id, index) => ids[index] === id);
+  if (appending) {
+    for (const message of chat.slice(drawnChat.ids.length)) thread.append(chatMessageEl(message));
+  } else {
+    thread.innerHTML = '';
+    for (const message of chat) thread.append(chatMessageEl(message));
+    if (!chat.length) {
+      const empty = document.createElement('div');
+      empty.className = 'chat-status';
+      empty.textContent = card.agent ? 'Nothing said yet.' : 'Anything you write here goes to the agent when it starts.';
+      thread.append(empty);
     }
-    if (message.images?.length) {
-      const pictures = document.createElement('div');
-      pictures.className = 'chat-pictures';
-      for (const image of message.images) {
-        const link = document.createElement('a');
-        link.href = fileUrl(image); link.target = '_blank'; link.rel = 'noopener';
-        const img = document.createElement('img');
-        img.src = fileUrl(image); img.alt = image.name || 'picture'; img.loading = 'lazy';
-        link.append(img);
-        pictures.append(link);
-      }
-      row.append(pictures);
-    }
-    thread.append(row);
   }
-  if (!chat.length) {
-    const empty = document.createElement('div');
-    empty.className = 'chat-status';
-    empty.textContent = card.agent ? 'Nothing said yet.' : 'Anything you write here goes to the agent when it starts.';
-    thread.append(empty);
-  }
+  drawnChat = { cardId: card.id, ids };
   const working = card.agent && !card.agent.stoppedAt && card.agent.progress;
   $('chat-status').textContent = working ? `🤖 ${card.agent.progress}` : '';
   if (!sameCard || atBottom) thread.scrollTop = thread.scrollHeight;
-  thread.dataset.card = card.id;
   renderChatPending();
 }
 // Pictures for the next message: uploaded to the card as they are added (so they are in its
@@ -977,7 +988,7 @@ async function sendChat() {
   try {
     const images = pictures.map((pending) => pending.attachment.id);
     const message = await api('POST', `/api/cards/${card.id}/chat`, { text, ...(images.length ? { images } : {}) });
-    card.chat = [...(card.chat || []), message];
+    card.chat = [...chatOf(card), message];
     input.value = '';
     chatPending = chatPending.filter((pending) => !pictures.includes(pending));
     renderChat(card);
@@ -1466,6 +1477,7 @@ function stableJSON(value) {
 const sameData = (a, b) => stableJSON(a) === stableJSON(b);
 const boardContent = ({ view, ...content }) => content; // where another tab looks is its own business
 const cardContent = (card) => card && { title: card.title, description: card.description, attachments: card.attachments, attSort: card.attSort };
+const agentContent = (card) => card && { chat: card.chat, agent: card.agent };
 async function checkForChanges() {
   if (DEMO || locked || away || checking || document.hidden || busy() || !ws) return;
   checking = true;
@@ -1496,7 +1508,10 @@ async function checkForChanges() {
       const card = currentCard();
       if (!card) { closeModal(); toast('This card was deleted elsewhere'); return; }
       if (!sameData(cardContent(card), cardContent(shownCard))) showCard(card);
-      else showCardMeta(card); // moved, say: only its dates show that
+      else {
+        showCardMeta(card); // moved, say: its dates show that
+        if (!sameData(agentContent(card), agentContent(shownCard))) { renderAgent(card); renderChat(card); }   // its agent said something
+      }
     }
   } catch (e) {
     changedElsewhere = true; // try again next time
