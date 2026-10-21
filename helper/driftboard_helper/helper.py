@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import shlex
+import shutil
 import sys
 import time
 
@@ -49,6 +50,7 @@ ACTIVE = ("working", "idle")
 # Right after a start or a wake, `claude agents` can still list the turn before as ended: an
 # ended listing counts only once the session was seen working, or after this long.
 LISTING_GRACE_SECONDS = 30
+CLOSED_KEPT_SECONDS = 7 * 86400   # a closed run (its folders, its registry entry) is forgotten after this
 
 
 def buttonsFor(run, column=None):
@@ -102,6 +104,7 @@ class Helper:
                 self.state = json.load(stateFile)
         except (OSError, ValueError):
             self.state = {"runs": {}}
+        self._saved = json.dumps(self.state, indent=1)
         self._relays = {}
 
     # ---- one pass ------------------------------------------------------------
@@ -130,6 +133,7 @@ class Helper:
                 except Exception:   # one card's surprise must not stop the others
                     logger.exception("card %s: unexpected error", card.get("id"))
         self._gone(onBoards)
+        self._prune()
         self._watch()
         for card, column in cards:
             wantedButtons = buttonsFor(self.state["runs"].get(card["id"]), column)
@@ -160,6 +164,23 @@ class Helper:
                 continue
             logger.info("card %s %s: closing its run", cardId, where)
             self._close(cardId, run)
+
+    def _prune(self):
+        """Closed runs are kept a week (what the agent did stays on the card), then forgotten: state,
+        run and control folders, and the tool's own record of the session."""
+        for cardId, run in list(self.state["runs"].items()):
+            if run.get("state") != "closed":
+                continue
+            run.setdefault("closedAt", self._clock())   # closed before this was kept: a week from now
+            if self._clock() - run["closedAt"] < CLOSED_KEPT_SECONDS:
+                continue
+            if run.get("session") and hasattr(self.launcher, "forget"):
+                self.launcher.forget(run["session"])
+            for folder in (os.path.join(self.directory, "runs", cardId), os.path.join(self.directory, "control", cardId)):
+                if os.path.realpath(folder).startswith(os.path.realpath(self.directory) + os.sep):
+                    shutil.rmtree(folder, ignore_errors=True)
+            del self.state["runs"][cardId]
+            self._relays.pop(cardId, None)
 
     def _card(self, card, column):
         runs = self.state["runs"]
@@ -414,7 +435,7 @@ class Helper:
         if run.get("state") in ACTIVE:
             self.launcher.stop(run["session"])
         self._revoke(cardId)
-        run["state"] = "closed"
+        run.update(state="closed", closedAt=self._clock())
         logger.info("card %s: closed by the user; its agent stopped", cardId)
 
     def _revoke(self, cardId):
@@ -435,7 +456,10 @@ class Helper:
     _states = None
 
     def _watch(self):
-        self._states = self.launcher.states()
+        watched = ACTIVE + ("stopped",)
+        # listing the tool's sessions costs a CLI start: only when a run needs it
+        needed = any(run.get("state") in watched for run in self.state["runs"].values())
+        self._states = self.launcher.states() if needed else None
         for cardId, run in self.state["runs"].items():
             if run.get("state") not in ACTIVE and run.get("state") != "stopped":
                 continue
@@ -478,11 +502,15 @@ class Helper:
             run["state"] = "idle"   # its turn is over: it asked, finished, or stopped by itself
 
     def _save(self):
+        text = json.dumps(self.state, indent=1)
+        if text == self._saved:
+            return   # nothing changed: not written again
         path = self.statePath + ".new"
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, "w") as stateFile:
-            json.dump(self.state, stateFile, indent=1)
+            stateFile.write(text)
         os.replace(path, self.statePath)
+        self._saved = text
 
 
 def build(config):

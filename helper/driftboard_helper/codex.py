@@ -141,6 +141,16 @@ class CodexLauncher:
                 time.sleep(0.2)
         return False
 
+    def forget(self, sessionId):
+        """A run the helper closed long ago: its thread leaves the registry."""
+        threads = self._threads()
+        if threads.pop(sessionId, None) is None:
+            return
+        descriptor = os.open(self.registry + ".new", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w") as registry:
+            json.dump(threads, registry)
+        os.replace(self.registry + ".new", self.registry)
+
     def states(self):
         """{thread id: (state, thread id)}: working while its codex process runs, done once it ended."""
         for pid, process in list(self._children.items()):

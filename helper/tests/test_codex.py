@@ -124,6 +124,13 @@ class CodexLaunchFailureTest(unittest.TestCase):
                                  startTimeout=1)
         return launcher, lambda: launcher.start("x", None, self.brief, "go", {"DRIFTBOARD_RUN": self.run})
 
+    def testAForgottenThreadLeavesTheRegistry(self):
+        launcher, _start = self.start("codex")
+        launcher._remember("thread-1", 1, {})
+        launcher._remember("thread-2", 2, {})
+        launcher.forget("thread-1")
+        self.assertEqual(sorted(launcher._threads()), ["thread-2"])
+
     def testAMissingCodexIsALaunchError(self):
         _launcher, start = self.start(os.path.join(self.directory.name, "no-such-codex"))
         with self.assertRaises(LaunchError):

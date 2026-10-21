@@ -445,6 +445,41 @@ class HelperTest(unittest.TestCase):
         self.assertTrue(any(call[1] == "stop" for call in self.claude.calls))
         self.assertEqual(self.helper._running(), 0)
 
+    def testTheToolsSessionsAreListedOnlyWhenAnAgentRuns(self):
+        self.item("Idle board")
+        self.helper.passOnce()
+        self.helper.passOnce()
+        self.assertFalse([call for call in self.claude.calls if call[1:3] == ["agents", "--json"]])
+
+    def testStateIsWrittenOnlyWhenItChanged(self):
+        cardId = self.item("Quiet")
+        self.helper.passOnce()
+        self.press(cardId, "context", "Something to keep.")
+        self.helper.passOnce()   # a change: written
+        path = os.path.join(self.directory.name, "state", "state.json")
+        before = os.stat(path).st_mtime_ns
+        self.helper.passOnce()
+        self.assertEqual(os.stat(path).st_mtime_ns, before)
+
+    def testAClosedRunIsForgottenAfterAWeek(self):
+        cardId = self.item("Long done")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        run = dict(self.helper.state["runs"][cardId])
+        found = self.board.call("GET", "/api/cards/%s" % cardId)
+        workspace = self.board.call("GET", "/api/workspaces/%s" % found["workspaceId"])
+        done = next(binder["id"] for binder in workspace["binders"] if binder["title"] == "Done")
+        self.board.call("POST", "/api/cards/%s/move" % cardId, {"binderId": done, "toIndex": 0})
+        self.helper.passOnce()
+        self.now += 6 * 86400
+        self.helper.passOnce()
+        self.assertIn(cardId, self.helper.state["runs"])   # within the week: kept
+        self.now += 2 * 86400
+        self.helper.passOnce()
+        self.assertNotIn(cardId, self.helper.state["runs"])
+        self.assertFalse(os.path.exists(run["folder"]) or os.path.exists(run["control"]))
+
     def testACardAlreadyClosedOffersNoAgent(self):
         # Live: cards posted straight into Won't do got ▶ Start.
         cardId = self.board.call("POST", "/api/items", {"source": "test", "title": "Out of scope", "column": "Won't do"})["cardId"]
