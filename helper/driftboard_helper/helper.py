@@ -177,7 +177,11 @@ class Helper:
             if self._running() >= self.config["agent"]["maxAgents"]:
                 return False
             self._chat(card)   # what the user wrote before pressing Start is context for it
-            self._start(card, (self.state["runs"].get(card["id"]) or {}).get("contexts") or [])
+            try:
+                self._start(card, (self.state["runs"].get(card["id"]) or {}).get("contexts") or [])
+            except LaunchError as error:   # said on the card; the press is done: no retry until pressed again
+                self._note(card["id"], "⚠ Could not start %s: %s" % (self.launcher.tool, error))
+                logger.warning("card %s: could not start %s: %s", card["id"], self.launcher.tool, error)
         elif button == "stop" and run and run.get("state") in ACTIVE:
             self.launcher.stop(run["session"])
             run["state"] = "stopped"
@@ -264,15 +268,19 @@ class Helper:
 
     def _start(self, card, contexts):
         token = self.board.request("POST", "/api/cards/%s/agent" % card["id"], {"name": self.launcher.tool})["token"]
-        folder = os.path.join(self.directory, "runs", card["id"])
-        os.makedirs(folder, mode=0o700, exist_ok=True)
-        with open(os.path.join(folder, "card.md"), "w") as cardFile:
-            cardFile.write(cardMarkdown(card, contexts))
-        outbox = os.path.join(folder, "outbox.jsonl")
-        settingsPath = self._writeSettings(folder, outbox)
-        prompt = self._firstPrompt(folder)
-        session = self.launcher.start("%s · board" % card.get("title", "card")[:60], settingsPath, BRIEF, prompt,
-                                      self._environment(folder, outbox))
+        try:
+            folder = os.path.join(self.directory, "runs", card["id"])
+            os.makedirs(folder, mode=0o700, exist_ok=True)
+            with open(os.path.join(folder, "card.md"), "w") as cardFile:
+                cardFile.write(cardMarkdown(card, contexts))
+            outbox = os.path.join(folder, "outbox.jsonl")
+            settingsPath = self._writeSettings(folder, outbox)
+            prompt = self._firstPrompt(folder)
+            session = self.launcher.start("%s · board" % card.get("title", "card")[:60], settingsPath, BRIEF, prompt,
+                                          self._environment(folder, outbox))
+        except (LaunchError, OSError) as error:
+            self._revoke(card["id"])   # no agent holds the token just minted
+            raise LaunchError(str(error)) from error
         seen = (self.state["runs"].get(card["id"]) or {}).get("seenChat") or []
         self.state["runs"][card["id"]] = {"state": "working", "session": session, "token": token, "folder": folder,
                                           "outbox": outbox, "offset": 0, "contexts": contexts, "queued": [],
@@ -346,12 +354,22 @@ class Helper:
     def _close(self, cardId, run):
         if run.get("state") in ACTIVE:
             self.launcher.stop(run["session"])
+        self._revoke(cardId)
+        run["state"] = "closed"
+        logger.info("card %s: closed by the user; its agent stopped", cardId)
+
+    def _revoke(self, cardId):
         try:
             self.board.request("DELETE", "/api/cards/%s/agent" % cardId)
         except BoardError as error:
             logger.warning("card %s: could not revoke its agent's token: %s", cardId, error)
-        run["state"] = "closed"
-        logger.info("card %s: closed by the user; its agent stopped", cardId)
+
+    def _note(self, cardId, text):
+        """Something the user should see on the card (a start or a session that failed)."""
+        try:
+            self.board.request("POST", "/api/cards/%s/attachments" % cardId, {"type": "text", "content": text[:2000]})
+        except BoardError as error:
+            logger.warning("card %s: could not add a note: %s", cardId, error)
 
     # ---- watching -------------------------------------------------------------
 
@@ -383,7 +401,12 @@ class Helper:
             run["seenWorking"] = True
         settled = (run.get("seenWorking") or not getattr(self.launcher, "listingsLag", False)
                    or self._clock() - run.get("turnAt", 0) > self.listingGrace)
-        if run["state"] == "working" and listed and listed[0] in TURN_OVER and settled:
+        if run["state"] == "working" and listed and listed[0] == "failed" and settled:
+            run["state"] = "stopped"   # not a turn that ended: the user sees why, and can Resume
+            self._note(cardId, "⚠ The %s session failed; `claude logs %s` shows why. ▶ Resume tries again."
+                       % (self.launcher.tool, run["session"]))
+            logger.warning("card %s: its %s session %s failed", cardId, self.launcher.tool, run["session"])
+        elif run["state"] == "working" and listed and listed[0] in TURN_OVER and settled:
             run["state"] = "idle"   # its turn is over: it asked, finished, or stopped by itself
         if run["state"] == "idle" and run.get("queued"):
             message = "\n\n".join(run.pop("queued"))

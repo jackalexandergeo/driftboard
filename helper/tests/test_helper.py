@@ -27,6 +27,7 @@ class FakeClaude:
         self.calls = []
         self.staleAfterWake = False   # as `claude agents` did live: still listing the turn before as done
         self.failResumes = 0   # this many wakes fail, as when claude cannot be run
+        self.failStarts = 0    # this many starts fail, as when claude is not signed in
 
     def __call__(self, command, workingDirectory):
         self.calls.append(command)
@@ -49,6 +50,9 @@ class FakeClaude:
                 return 0, "backgrounded · %s · x\n" % key, ""
             self._turn(session)
             return 0, "backgrounded · %s · x\n" % key, ""
+        if self.failStarts:
+            self.failStarts -= 1
+            return 1, "", "claude: not signed in"
         with open(command[command.index("--settings") + 1]) as settingsFile:
             settings = json.load(settingsFile)
         key = "%08x" % (0xb0000000 + len(self.sessions))
@@ -389,6 +393,37 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(session["messages"], ["The user replied: The 2026 ledger."])
         chat = [message["text"] for message in self.card(cardId)["chat"] if message["from"] == "user"]
         self.assertEqual(chat, ["The 2026 ledger."])
+
+    def notes(self, cardId):
+        return [attachment["content"] for attachment in self.card(cardId)["attachments"] if attachment.get("type") == "text"]
+
+    def testAStartThatFailsSaysWhyOnTheCardAndIsNotRetried(self):
+        cardId = self.item("Not signed in")
+        self.helper.passOnce()
+        self.claude.failStarts = 1
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        self.helper.passOnce()
+        card = self.card(cardId)
+        self.assertNotIn("pressed", card)
+        self.assertTrue(card["agent"]["stoppedAt"])   # the token it minted is revoked
+        self.assertEqual([note[:24] for note in self.notes(cardId)], ["⚠ Could not start claude"])
+        self.assertIn("not signed in", self.notes(cardId)[0])
+        self.assertEqual(len([call for call in self.claude.calls if "--settings" in call]), 1)   # tried once, not every pass
+        self.assertEqual(self.buttons(cardId), [START["id"], CONTEXT["id"]])   # the user can try again
+
+    def testAFailedSessionIsReportedOnTheCard(self):
+        cardId = self.item("Fails")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        next(iter(self.claude.sessions.values()))["state"] = "failed"
+        self.now += 31
+        self.helper.passOnce()
+        self.assertEqual(self.helper.state["runs"][cardId]["state"], "stopped")
+        self.assertIn("session failed", " ".join(self.notes(cardId)))
+        self.assertEqual(self.buttons(cardId), [RESUME["id"], REPLY["id"], CONTEXT["id"]])
 
     def testACardAlreadyClosedOffersNoAgent(self):
         # Live: cards posted straight into Won't do got ▶ Start.
