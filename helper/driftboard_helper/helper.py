@@ -144,7 +144,9 @@ class Helper:
         elif button == "stop" and run and run.get("state") in ACTIVE:
             self.launcher.stop(run["session"])
             run["state"] = "stopped"
-        elif button in ("reply", "context") and text:
+        elif button in ("reply", "context") and not text:
+            logger.warning("card %s: %s pressed without text (is the board older than the helper?)", card["id"], button)
+        elif button in ("reply", "context"):
             label = "You replied" if button == "reply" else "Context from you"
             self.board.request("POST", "/api/cards/%s/attachments" % card["id"], {"type": "text", "content": "**%s:** %s" % (label, text)})
             if not run or run.get("state") == "waiting":
