@@ -340,9 +340,19 @@ at work count against `maxAgents`: one that finished its turn and waits for you 
 A card that carries another script's buttons is left alone. The helper forgets closed runs
 after a week.
 
+**A budget for the agents.** `[agent.budget]` keeps Claude agents to a share of your 5-hour
+Claude limit, in percent. Past `cardPercent`, a card's agent stops and the card says why; ▶
+Resume or a reply allows it as much again. Past `totalPercent`, all the agents together stop,
+a notice at the top of the board says so, and no agent starts or wakes until the 5-hour
+window resets (a ▶ Start pressed meanwhile waits for it). The share is an estimate: the
+endpoint Claude Code's `/usage` reads says how full the window is, and Claude Code's
+transcripts (`~/.claude/projects`) say which of it the agents' sessions took. Use on
+claude.ai or another machine is not in the transcripts, so the estimate runs high when you
+work there too. While the endpoint has not answered, no budget is kept.
+
 `check` says, with how to fix each: whether the tool is installed (and Codex signed in), the
 token readable, the board up and proving itself, and the watched boards there with their
-agent columns.
+agent columns; with a budget set, whether Claude's usage is readable.
 
 **What an agent may do.** Each agent reports through `driftboard-agent` (progress, note,
 ask, result, move), which writes to a file the helper forwards: the agent needs no network

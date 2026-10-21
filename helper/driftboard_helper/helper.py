@@ -19,12 +19,13 @@ import time
 
 from .board import BoardClient, BoardError
 from .claude import TURN_OVER, ClaudeLauncher, LaunchError
-from .config import configProblems, loadConfig, stateDirectory
+from .config import budgetOf, configProblems, loadConfig, stateDirectory
 from .guard import writeGuards
 from .outbox import append
 from .terminal import SOCKET_NAME, TerminalServer, boardTerminals, openWindow
 from .relay import Relay
 from .rules import claudePermissions, guidanceFor, limitsOf, rulesFor, unguarded
+from .usage import UsageMeter, resetText
 
 logger = logging.getLogger("driftboard_helper")
 
@@ -95,11 +96,14 @@ def cardMarkdown(card, contexts):
 
 
 class Helper:
-    def __init__(self, config, board, launcher, directory, clock=time.time, listingGrace=LISTING_GRACE_SECONDS):
+    def __init__(self, config, board, launcher, directory, clock=time.time, listingGrace=LISTING_GRACE_SECONDS,
+                 usage=None):
+        """usage: a UsageMeter, when [agent.budget] sets a budget."""
         self.config = config
         self.board = board
         self.launcher = launcher
         self.directory = directory
+        self.usage = usage
         self._clock = clock
         self.listingGrace = listingGrace
         self.statePath = os.path.join(directory, "state.json")
@@ -119,6 +123,7 @@ class Helper:
         """Presses first, then what the agents did, then the buttons: so a card's buttons always
         match what the pass found."""
         listed = self.board.request("GET", "/api/state")
+        self._boardNotice = (listed.get("notice") or {}).get("text")
         wanted = set(self.config["board"]["workspaces"])
         cards, onBoards = [], set()
         for summary in listed.get("workspaces") or []:
@@ -141,6 +146,7 @@ class Helper:
         self._gone(onBoards)
         self._prune()
         self._watch()
+        self._budget()
         for card, column in cards:
             run = self.state["runs"].get(card["id"])
             attachable = bool(run) and self.launcher.attachCommand(run)[0] is not None
@@ -233,7 +239,7 @@ class Helper:
         run = runs.get(card["id"])
         button, text = pressed["button"], (pressed.get("text") or "").strip()
         if button == "start" and (not run or run.get("state") == "waiting"):
-            if self._running() >= self.config["agent"]["maxAgents"]:
+            if not self._slotFree():
                 return False
             self._chat(card)   # what the user wrote before pressing Start is context for it
             try:
@@ -354,7 +360,8 @@ class Helper:
         return len([run for run in self.state["runs"].values() if run.get("state") == "working"])
 
     def _slotFree(self):
-        return self._running() < self.config["agent"]["maxAgents"]
+        """Room for one more agent at work; none while the agents together are past their budget."""
+        return self._running() < self.config["agent"]["maxAgents"] and not self.state.get("paused")
 
     # ---- starting, waking, stopping -----------------------------------------------
 
@@ -379,7 +386,8 @@ class Helper:
             self._revoke(card["id"])   # no agent holds the token just minted
             raise LaunchError(str(error)) from error
         seen = (self.state["runs"].get(card["id"]) or {}).get("seenChat") or []
-        self.state["runs"][card["id"]] = {"state": "working", "session": session, "token": token, "folder": folder,
+        self.state["runs"][card["id"]] = {"state": "working", "session": session, "sessions": [session],
+                                          "token": token, "folder": folder,
                                           "control": control, "settingsPath": settingsPath,
                                           "outbox": outbox, "offset": 0, "contexts": contexts, "queued": [],
                                           "startedAt": self._clock(), "turnAt": self._clock(), "seenWorking": False,
@@ -475,6 +483,9 @@ class Helper:
             raise LaunchError("no full session id for %s yet" % run["session"])
         append(run["outbox"], {"kind": "move", "column": "Working"})   # back at work, off Needs you or Review: before its own reports
         run["session"] = self.launcher.resume(run["session"], full, message)
+        self._sessionSeen(run, run["session"])
+        if run.pop("overBudget", False):   # the user woke it: it may spend its card budget again
+            run["budgetUntil"] = round((run.get("spent") or 0) + budgetOf(self.config)["cardPercent"], 1)
         run.update(state="working", turnAt=self._clock(), seenWorking=False, asked=False, approvalShown=False)
         logger.info("card %s: woke its agent", cardId)
 
@@ -546,6 +557,7 @@ class Helper:
         listed = (self._states or {}).get(run["session"])
         if listed and listed[1]:
             run["fullSession"] = listed[1]
+            self._sessionSeen(run, listed[1])
         if listed and listed[0] == "working":
             run["seenWorking"] = True
         settled = (run.get("seenWorking") or not getattr(self.launcher, "listingsLag", False)
@@ -563,6 +575,85 @@ class Helper:
             self._progress(cardId, run, "Waiting for your yes on a command: run `claude attach %s` to approve or "
                                         "decline it" % run["session"])
             run["approvalShown"] = True
+
+    # ---- the budget -----------------------------------------------------------
+
+    _boardNotice = None
+
+    @staticmethod
+    def _sessionSeen(run, sessionId):
+        """Every session id a run had: a woken session can list under a new short id."""
+        sessions = run.setdefault("sessions", [run["session"]] if run.get("session") else [])
+        if sessionId and sessionId not in sessions:
+            sessions.append(sessionId)
+
+    def _budget(self):
+        """Stop a card's agent past its card budget, and every agent once all of them together
+        are past the total budget; then no agent starts or wakes until the 5-hour window resets.
+        A share that is not known (the usage endpoint did not answer yet) stops nothing."""
+        budget = budgetOf(self.config)
+        if self.usage is None or not any(budget.values()):
+            return
+        runs = [(cardId, run) for cardId, run in self.state["runs"].items() if run.get("sessions")]
+        if not runs and not self.state.get("paused"):
+            return
+        self.usage.refresh()
+        window = self.usage.resetsAt
+        total, known = 0.0, True
+        for cardId, run in runs:
+            spent = self.usage.ofLimit(run["sessions"])
+            if spent is None:
+                known = False
+                break
+            if run.get("budgetWindow") != window:   # a new window: every card starts its budget again
+                run.update(budgetWindow=window, budgetUntil=None)
+            run["spent"] = spent
+            total += spent
+            allowed = run.get("budgetUntil") or budget["cardPercent"]
+            if budget["cardPercent"] and run.get("state") == "working" and spent >= allowed:
+                run["overBudget"] = True
+                self._halt(cardId, run, "⏸ Stopped: this card's agent used %g%% of the 5-hour Claude limit (card "
+                                        "budget %g%%). ▶ Resume or a reply allows it %g%% more."
+                                        % (spent, allowed, budget["cardPercent"]))
+        if not known:
+            return
+        paused = bool(budget["totalPercent"]) and total >= budget["totalPercent"]
+        reset = resetText(window)
+        if paused and not self.state.get("paused"):
+            logger.warning("agents used %g%% of the 5-hour limit together (budget %g%%): paused", total,
+                           budget["totalPercent"])
+            for cardId, run in runs:
+                if run.get("state") == "working":
+                    self._halt(cardId, run, "⏸ Stopped: the board's agents together used %g%% of the 5-hour Claude "
+                                            "limit (total budget %g%%). ▶ Resume works again after the reset%s."
+                                            % (total, budget["totalPercent"], " at %s" % reset if reset else ""))
+        elif self.state.get("paused") and not paused:
+            logger.info("agents' budget free again (%g%% of the 5-hour limit used)", total)
+        self.state["paused"] = paused
+        self._notice("Agents paused: together they used %g%% of the 5-hour Claude limit (budget %g%%)%s"
+                     % (total, budget["totalPercent"], " until %s" % reset if reset else "") if paused else None)
+
+    def _halt(self, cardId, run, why):
+        self.launcher.stop(run["session"])
+        run["state"] = "stopped"
+        append(run["outbox"], {"kind": "move", "column": "Needs you"})   # it waits on the user now
+        self._note(cardId, why)
+        logger.warning("card %s: %s", cardId, why)
+
+    def _notice(self, text):
+        """The board's notice line says the agents are paused; it comes down when they are not.
+        Only a notice the helper put up is ever taken down."""
+        if text == self.state.get("notice"):
+            return
+        try:
+            if text:
+                self.board.request("PUT", "/api/notice", {"text": text, "level": "warning"})
+            elif self._boardNotice == self.state.get("notice"):
+                self.board.request("DELETE", "/api/notice")
+        except BoardError as error:
+            logger.warning("the board's notice: %s", error)
+            return
+        self.state["notice"] = text
 
     def _save(self):
         text = json.dumps(self.state, indent=1)
@@ -585,7 +676,8 @@ def build(config):
                                  model=config["agent"].get("model") or None)
     else:
         launcher = ClaudeLauncher(directory)
-    helper = Helper(config, board, launcher, stateDirectory())
+    usage = UsageMeter() if any(budgetOf(config).values()) else None
+    helper = Helper(config, board, launcher, stateDirectory(), usage=usage)
     if config.get("terminal", {}).get("board", True) and boardTerminals():
         try:
             helper.terminals = TerminalServer(os.path.join(stateDirectory(), SOCKET_NAME), helper.commandFor,

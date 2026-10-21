@@ -33,3 +33,7 @@ board = true                   # ⌨ Terminal in the board page (Linux and macOS
 # chat = "never"               # comments), push, http, credentials. Each "never" (whatever is said),
                                # "ask" (default; credentials never) or "allow". "ask" waits for your yes
                                # in the agent's session: the card says so, with the command to answer it.
+
+[agent.budget]                 # shares of your 5-hour Claude limit, in percent (Claude only); 0 is no budget
+# cardPercent = 10             # one card's agent: past it the agent stops; ▶ Resume or a reply allows it as much again
+# totalPercent = 15            # all agents together: past it they stop, and none starts or wakes until the reset
