@@ -564,7 +564,7 @@ function makeCardEl(card, free) {
   if (free) { el.style.left = card.x + 'px'; el.style.top = card.y + 'px'; }
   else if (card.binderId) { // accent stripe matches the binder's colour (set inline so the drag ghost keeps it)
     const binder = ws.binders.find((b) => b.id === card.binderId);
-    if (binder) el.style.setProperty('--binder-color', binderColor(binder, ws.binders.indexOf(binder)));
+    if (binder) paintBinderColor(el, binderColor(binder, ws.binders.indexOf(binder)));
   }
   el.innerHTML = `<div class="card-accent"></div><div class="card-title-txt"></div><div class="card-agent"></div><div class="card-desc"></div>${cardBadges(card)}`;
   el.querySelector('.card-title-txt').textContent = card.title;
@@ -596,13 +596,25 @@ function makeCardEl(card, free) {
 
 // Only a #rrggbb colour is drawn (the server takes no other now); one saved before is ignored.
 const binderColor = (binder, index) => (/^#[0-9a-f]{6}$/i.test(binder.color || '') ? binder.color : BINDER_COLORS[index % BINDER_COLORS.length]);
+// Text on a binder's colour: white or near-black, whichever contrasts more (WCAG luminance), so
+// a label stays readable on yellow and on dark grey alike, in either theme.
+function inkOn(hex) {
+  const channel = (value) => { const c = value / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  const [r, g, b] = [1, 3, 5].map((start) => channel(parseInt(hex.slice(start, start + 2), 16)));
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return (1.05 / (luminance + 0.05)) >= ((luminance + 0.05) / 0.0599) ? '#ffffff' : '#16191b';
+}
+function paintBinderColor(el, color) {
+  el.style.setProperty('--binder-color', color);
+  el.style.setProperty('--binder-ink', inkOn(color));
+}
 
 function makeBinderEl(binder, index) {
   const el = document.createElement('div');
   el.className = 'binder' + (binder.id === pendingPopId ? ' pop-in' : '');
   el.dataset.id = binder.id;
   el.style.left = binder.x + 'px'; el.style.top = binder.y + 'px';
-  el.style.setProperty('--binder-color', binderColor(binder, index));
+  paintBinderColor(el, binderColor(binder, index));
   const cards = ws.cards.filter((c) => c.binderId === binder.id).sort((a, b) => a.order - b.order);
   el.innerHTML = `
     <div class="binder-head">

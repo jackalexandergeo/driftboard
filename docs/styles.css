@@ -231,7 +231,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .agent-progress { color: var(--muted); margin-bottom: 8px; white-space: pre-wrap; }
 .card-button { font: inherit; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; cursor: pointer;
   border: 1px solid var(--binder-color, var(--gray)); background: transparent; color: var(--text); }
-.card-button:hover:not(:disabled) { background: var(--binder-color, var(--gray)); color: var(--bg); }
+.card-button:hover:not(:disabled) { background: var(--binder-color, var(--gray)); color: var(--binder-ink, #ffffff); }
 .card-button:disabled { opacity: 0.5; cursor: progress; }
 .card-button.stale { border-style: dashed; }
 .card-button.confirming, .card-button.confirming:hover { background: var(--red); border-color: var(--red); color: #fff; }
