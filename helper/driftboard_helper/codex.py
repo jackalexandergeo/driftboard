@@ -21,6 +21,7 @@ SANDBOX = ["-c", 'sandbox_mode="workspace-write"', "-c", 'approval_policy="never
 
 class CodexLauncher:
     tool = "codex"
+    listingsLag = False   # its states are whether its process runs: never behind
 
     def __init__(self, directory, registry, model=None, command="codex", startTimeout=60):
         """registry: a file that keeps each thread's process and environment, so a restarted

@@ -39,6 +39,9 @@ CONTEXT = {"id": "context", "label": "＋ Context", "title": "Tell the agent som
 
 # run states: waiting (context only, not started), working, idle (its turn ended), stopped, closed
 ACTIVE = ("working", "idle")
+# Right after a start or a wake, `claude agents` can still list the turn before as ended: an
+# ended listing counts only once the session was seen working, or after this long.
+LISTING_GRACE_SECONDS = 30
 
 
 def buttonsFor(run):
@@ -73,12 +76,13 @@ def cardMarkdown(card, contexts):
 
 
 class Helper:
-    def __init__(self, config, board, launcher, directory, clock=time.time):
+    def __init__(self, config, board, launcher, directory, clock=time.time, listingGrace=LISTING_GRACE_SECONDS):
         self.config = config
         self.board = board
         self.launcher = launcher
         self.directory = directory
         self._clock = clock
+        self.listingGrace = listingGrace
         self.statePath = os.path.join(directory, "state.json")
         try:
             with open(self.statePath) as stateFile:
@@ -167,7 +171,7 @@ class Helper:
                                       self._environment(folder, outbox))
         self.state["runs"][card["id"]] = {"state": "working", "session": session, "token": token, "folder": folder,
                                           "outbox": outbox, "offset": 0, "contexts": contexts, "queued": [],
-                                          "startedAt": self._clock()}
+                                          "startedAt": self._clock(), "turnAt": self._clock(), "seenWorking": False}
         append(outbox, {"kind": "progress", "text": "%s started" % self.launcher.tool})
         logger.info("card %s: started %s session %s", card["id"], self.launcher.tool, session)
 
@@ -221,7 +225,7 @@ class Helper:
         if not full:
             raise LaunchError("no full session id for %s yet" % run["session"])
         run["session"] = self.launcher.resume(run["session"], full, message)
-        run["state"] = "working"
+        run.update(state="working", turnAt=self._clock(), seenWorking=False)
         logger.info("card %s: woke its agent", cardId)
 
     def _close(self, cardId, run):
@@ -254,7 +258,11 @@ class Helper:
             listed = (self._states or {}).get(run["session"])
             if listed and listed[1]:
                 run["fullSession"] = listed[1]
-            if run["state"] == "working" and listed and listed[0] in ENDED:
+            if listed and listed[0] == "working":
+                run["seenWorking"] = True
+            settled = (run.get("seenWorking") or not getattr(self.launcher, "listingsLag", False)
+                       or self._clock() - run.get("turnAt", 0) > self.listingGrace)
+            if run["state"] == "working" and listed and listed[0] in ENDED and settled:
                 run["state"] = "idle"   # its turn is over: it asked, finished, or stopped by itself
             if run["state"] == "idle" and run.get("queued"):
                 message = "\n\n".join(run.pop("queued"))

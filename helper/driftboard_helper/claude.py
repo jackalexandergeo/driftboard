@@ -30,6 +30,7 @@ def runCommand(command, workingDirectory):
 
 class ClaudeLauncher:
     tool = "claude"
+    listingsLag = True   # `claude agents` can list a just-woken session's turn before as ended
 
     def __init__(self, directory, run=runCommand):
         self.directory = directory

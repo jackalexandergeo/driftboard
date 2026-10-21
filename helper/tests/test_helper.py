@@ -25,6 +25,7 @@ class FakeClaude:
         self.turns = turns   # one list of (command, text) per turn
         self.sessions = {}
         self.calls = []
+        self.staleAfterWake = False   # as `claude agents` did live: still listing the turn before as done
 
     def __call__(self, command, workingDirectory):
         self.calls.append(command)
@@ -39,6 +40,9 @@ class FakeClaude:
             assert len(command) == 5, "a flag on --resume starts a copy"
             key, session = next((key, session) for key, session in self.sessions.items() if session["full"] == command[3])
             session["messages"].append(command[4])
+            if self.staleAfterWake:
+                session["state"] = "done"   # the turn before, still
+                return 0, "backgrounded · %s · x\n" % key, ""
             self._turn(session)
             return 0, "backgrounded · %s · x\n" % key, ""
         with open(command[command.index("--settings") + 1]) as settingsFile:
@@ -78,6 +82,7 @@ class HelperTest(unittest.TestCase):
         self.config["agent"].update(directory=self.project, maxAgents=2)
         self.claude = FakeClaude([[("progress", "reading 12 invoices"), ("ask", "The 2025 or the 2026 ledger?")],
                                   [("result", "**2 mismatches**"), ("move", "Review")]])
+        self.now = 1000.0
         self.helper = self.newHelper()
 
     def tearDown(self):
@@ -89,7 +94,8 @@ class HelperTest(unittest.TestCase):
         config["agent"].update(agent)
         state = os.path.join(self.directory.name, "state")
         os.makedirs(state, exist_ok=True)
-        return Helper(config, BoardClient(self.board.url, self.board.tokenFile), ClaudeLauncher(self.project, run=self.claude), state)
+        return Helper(config, BoardClient(self.board.url, self.board.tokenFile), ClaudeLauncher(self.project, run=self.claude), state,
+                      clock=lambda: self.now, listingGrace=30)
 
     def item(self, title):
         return self.board.call("POST", "/api/items", {"source": "test", "title": title, "body": "Check every invoice."})["cardId"]
@@ -104,9 +110,11 @@ class HelperTest(unittest.TestCase):
         return [button["id"] for button in self.card(cardId).get("buttons") or []]
 
     def settle(self):
-        """A pass, the agent's turn, and a pass that sees its turn end."""
+        """A pass, the agent's turn, and a pass that sees its turn end (the stand-in's turns are over
+        before a pass can see them working: past the listing grace)."""
         self.helper.passOnce()
         self.claude.wait()
+        self.now += 31
         self.helper.passOnce()
 
     def testAnAgentAsksIsAnsweredFromTheCardAndFinishesInReview(self):
@@ -117,6 +125,7 @@ class HelperTest(unittest.TestCase):
         self.helper.passOnce()
         self.assertEqual(self.buttons(cardId), [STOP["id"], CONTEXT["id"]])
         self.claude.wait()
+        self.now += 31
         self.helper.passOnce()
         card = self.card(cardId)
         self.assertEqual((self.board.column(cardId), card["agent"]["question"]), ("Needs you", "The 2025 or the 2026 ledger?"))
@@ -153,9 +162,33 @@ class HelperTest(unittest.TestCase):
         self.press(cardId, "context", "Use the new rates.")
         self.helper.passOnce()   # still working (or just done, but not yet seen): kept for later
         self.claude.wait()
+        self.now += 31
         self.helper.passOnce()   # its turn ended: woken with the context
         session = next(iter(self.claude.sessions.values()))
         self.assertEqual(session["messages"], ["The user added context: Use the new rates."])
+
+    def testAStaleEndedListingRightAfterAWakeDoesNotEndTheTurn(self):
+        # Live: `claude agents` listed a just-woken session as done; the helper took its turn as over.
+        cardId = self.item("Woken")
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        self.now += 31
+        self.helper.passOnce()
+        self.assertEqual(self.helper.state["runs"][cardId]["state"], "idle")
+        session = next(iter(self.claude.sessions.values()))
+        self.claude.staleAfterWake = True
+        self.press(cardId, "reply", "The 2026 ledger.")
+        self.helper.passOnce()   # woken, and listed as done all the same
+        self.assertEqual(session["messages"], ["The user replied: The 2026 ledger."])
+        self.helper.passOnce()
+        self.assertEqual(self.helper.state["runs"][cardId]["state"], "working")   # within the grace: not trusted
+        session["state"] = "working"
+        self.helper.passOnce()   # seen working ...
+        session["state"] = "done"
+        self.helper.passOnce()   # ... so this one is the end of its turn
+        self.assertEqual(self.helper.state["runs"][cardId]["state"], "idle")
 
     def testClosingTheCardStopsTheAgentAndItsToken(self):
         cardId = self.item("Close me")
