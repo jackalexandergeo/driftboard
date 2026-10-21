@@ -131,6 +131,7 @@ class Helper:
             if pressed.get("button") and self._press(card, pressed):
                 self.board.request("PATCH", "/api/cards/%s" % card["id"], {"pressed": None})
                 card.pop("buttons", None)   # what the press changed is set at the end of the pass
+            self._chat(card)
 
     def _press(self, card, pressed):
         """Act on a press; False to leave it for a later pass (more agents running than allowed)."""
@@ -140,20 +141,44 @@ class Helper:
         if button == "start" and (not run or run.get("state") == "waiting"):
             if self._running() >= self.config["agent"]["maxAgents"]:
                 return False
-            self._start(card, (run or {}).get("contexts") or [])
+            self._chat(card)   # what the user wrote before pressing Start is context for it
+            self._start(card, (self.state["runs"].get(card["id"]) or {}).get("contexts") or [])
         elif button == "stop" and run and run.get("state") in ACTIVE:
             self.launcher.stop(run["session"])
             run["state"] = "stopped"
         elif button in ("reply", "context") and not text:
             logger.warning("card %s: %s pressed without text (is the board older than the helper?)", card["id"], button)
         elif button in ("reply", "context"):
-            label = "You replied" if button == "reply" else "Context from you"
-            self.board.request("POST", "/api/cards/%s/attachments" % card["id"], {"type": "text", "content": "**%s:** %s" % (label, text)})
-            if not run or run.get("state") == "waiting":
-                runs[card["id"]] = dict(run or {"state": "waiting"}, contexts=((run or {}).get("contexts") or []) + [text])
-            else:
-                self._tell(card["id"], run, "%s: %s" % ("The user replied" if button == "reply" else "The user added context", text))
+            # into the card's chat, where the user reads it back; this pass delivers it
+            message = self.board.request("POST", "/api/cards/%s/chat" % card["id"], {"text": text})
+            self._deliver(card["id"], text, "The user replied" if button == "reply" else "The user added context")
+            self._seen(card["id"]).append(message["id"])
         return True
+
+    def _seen(self, cardId):
+        run = self.state["runs"].setdefault(cardId, {"state": "waiting", "contexts": []})
+        return run.setdefault("seenChat", [])
+
+    def _chat(self, card):
+        """What the user wrote in the card's chat since the last pass goes to the agent, once."""
+        seen = set(self._seen(card["id"])) if card["id"] in self.state["runs"] else set()
+        for message in card.get("chat") or []:
+            if message.get("from") != "user" or message.get("id") in seen:
+                continue
+            self._deliver(card["id"], message.get("text") or "", "The user says")
+            self._seen(card["id"]).append(message["id"])
+        run = self.state["runs"].get(card["id"])
+        if run and len(run.get("seenChat") or []) > 1000:
+            run["seenChat"] = run["seenChat"][-1000:]
+
+    def _deliver(self, cardId, text, label):
+        """Before the agent starts: context for its first prompt. After: to the agent, now or when its turn ends."""
+        runs = self.state["runs"]
+        run = runs.get(cardId)
+        if not run or run.get("state") == "waiting":
+            runs[cardId] = dict(run or {"state": "waiting"}, contexts=((run or {}).get("contexts") or []) + [text])
+        elif run.get("state") != "closed":
+            self._tell(cardId, run, "%s: %s" % (label, text))
 
     def _running(self):
         return len([run for run in self.state["runs"].values() if run.get("state") in ACTIVE])
@@ -171,9 +196,11 @@ class Helper:
         prompt = self._firstPrompt(folder)
         session = self.launcher.start("%s · board" % card.get("title", "card")[:60], settingsPath, BRIEF, prompt,
                                       self._environment(folder, outbox))
+        seen = (self.state["runs"].get(card["id"]) or {}).get("seenChat") or []
         self.state["runs"][card["id"]] = {"state": "working", "session": session, "token": token, "folder": folder,
                                           "outbox": outbox, "offset": 0, "contexts": contexts, "queued": [],
-                                          "startedAt": self._clock(), "turnAt": self._clock(), "seenWorking": False}
+                                          "startedAt": self._clock(), "turnAt": self._clock(), "seenWorking": False,
+                                          "seenChat": seen}
         append(outbox, {"kind": "progress", "text": "%s started" % self.launcher.tool})
         logger.info("card %s: started %s session %s", card["id"], self.launcher.tool, session)
 

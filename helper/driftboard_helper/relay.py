@@ -8,7 +8,7 @@ from .outbox import OutboxReader
 logger = logging.getLogger(__name__)
 
 # report kind -> (method, path after /api/agent/cards/<id>, the field the board reads)
-AGENT_CALLS = {"progress": ("PATCH", "", "progress"), "result": ("PATCH", "", "result"),
+AGENT_CALLS = {"progress": ("PATCH", "", "progress"), "result": ("PATCH", "", "result"), "say": ("POST", "/chat", "text"),
                "note": ("POST", "/notes", "content"), "ask": ("POST", "/ask", "question"),
                "move": ("POST", "/move", "column")}
 CLOSED = 409   # the user moved the card to Done or Won't do

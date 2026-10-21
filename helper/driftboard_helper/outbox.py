@@ -10,7 +10,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-TEXT_LIMITS = {"progress": 300, "note": 20000, "ask": 2000, "result": 20000}
+TEXT_LIMITS = {"progress": 300, "say": 8000, "note": 20000, "ask": 2000, "result": 20000}
 AGENT_COLUMNS = ("Working", "Needs you", "Review")
 KINDS = tuple(TEXT_LIMITS) + ("move",)
 

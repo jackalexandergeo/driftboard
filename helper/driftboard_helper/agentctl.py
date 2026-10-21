@@ -1,6 +1,7 @@
 """driftboard-agent: what an agent runs to keep its card current.
 
     driftboard-agent progress "reading 12 invoices"     one line on the card's face
+    driftboard-agent say "Found 2 mismatches so far."   a message in the card's chat with the user
     driftboard-agent note "invoice 7 is in EUR"         a note on the card
     driftboard-agent ask "The 2025 or the 2026 ledger?" the card goes to Needs you; then stop and wait
     driftboard-agent result --file answer.md            the result (markdown; text, --file or - for stdin)
@@ -19,7 +20,8 @@ from .outbox import AGENT_COLUMNS, TEXT_LIMITS, append
 def main(arguments=None):
     parser = argparse.ArgumentParser(prog="driftboard-agent", description="Keep your card on the board current.")
     commands = parser.add_subparsers(dest="kind", required=True)
-    for kind, what in (("progress", "one line on the card's face"), ("note", "a note on the card"),
+    for kind, what in (("progress", "one line on the card's face"), ("say", "a message in the card's chat with the user"),
+                       ("note", "a note on the card"),
                        ("ask", "a question for the user: the card goes to Needs you; then stop and wait"),
                        ("result", "the result, in markdown")):
         command = commands.add_parser(kind, help="%s (at most %d characters)" % (what, TEXT_LIMITS[kind]))
