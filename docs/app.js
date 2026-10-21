@@ -1410,10 +1410,11 @@ document.addEventListener('focusin', (e) => {
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) t.dataset.origValue = t.value;
 });
-// Capture phase so this runs before the per-field / modal Escape handlers.
+// Capture phase so this runs before the per-field / modal Escape handlers. The text dialog's
+// field has its own: Escape closes the dialog, Ctrl/Cmd+Enter sends it.
 document.addEventListener('keydown', (e) => {
   const t = e.target;
-  if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA')) return;
+  if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA') || t.id === 'input-text') return;
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault(); e.stopPropagation();
     t.blur(); // apply — every field saves on blur
