@@ -485,7 +485,7 @@ class Helper:
         run["session"] = self.launcher.resume(run["session"], full, message)
         self._sessionSeen(run, run["session"])
         if run.pop("overBudget", False):   # the user woke it: it may spend its card budget again
-            run["budgetUntil"] = (run.get("spent") or 0) + budgetOf(self.config)["cardPercent"]
+            run["budgetUntil"] = round((run.get("spent") or 0) + budgetOf(self.config)["cardPercent"], 1)
         run.update(state="working", turnAt=self._clock(), seenWorking=False, asked=False, approvalShown=False)
         logger.info("card %s: woke its agent", cardId)
 
