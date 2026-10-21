@@ -35,11 +35,15 @@ API_READ_FLAGS = {"--paginate", "-i", "--include", "--silent", "--slurp", "--ver
 API_READ_FLAGS_WITH_VALUE = {"-H", "--header", "--hostname", "--jq", "-q", "--template", "-t", "--cache", "-p",
                              "--preview", "-R", "--repo", "--output"}
 GIT_GLOBAL_WITH_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path")
-GIT_CONFIG_REFUSED = ("alias.", "url.", "remote.", "core.sshcommand", "core.hookspath", "credential.")
+GIT_CONFIG_REFUSED = ("alias.", "url.", "remote.", "core.sshcommand", "core.hookspath", "credential.", "include.",
+                      "includeif.")
 PUSHING = re.compile(r"\b(push|send-pack)\b")
 SSH_WITH_VALUE = ("-o", "-p")
 GIT_TRANSPORT_OPTIONS = ("-4", "-6", "-T", "-x")
 GIT_FETCHES = {"git-upload-pack", "git-upload-archive"}
+# All git asks the far end to run: one service and one quoted path, nothing after it.
+GIT_REMOTE_COMMAND = re.compile(r"(git-upload-pack|git-upload-archive|git-receive-pack) '[^']*'")
+GIT_REMOTE_USER = re.compile(r"[A-Za-z0-9._-]*")
 
 
 def positional(arguments, withValue=()):
@@ -69,13 +73,30 @@ def verdict(command, arguments, gitHosts=(), aliasOf=None, pushOpen=False):
     return None
 
 
+FORGE_ALL_WITH_VALUE = FORGE_FLAGS_WITH_VALUE + ("-X", "--method", "-f", "-F", "--field", "--raw-field", "--input")
+
+
+def firstPositional(arguments, withValue):
+    """The index of the first argument that is not an option (or an option's value), or None."""
+    index = 0
+    while index < len(arguments):
+        if arguments[index] in withValue:
+            index += 2
+        elif arguments[index].startswith("-"):
+            index += 1
+        else:
+            return index
+    return None
+
+
 def forgeVerdict(command, arguments):
-    words = positional(arguments, FORGE_FLAGS_WITH_VALUE + ("-X", "--method", "-f", "-F", "--field", "--raw-field",
-                                                            "--input"))
+    words = positional(arguments, FORGE_ALL_WITH_VALUE)
     if not words:
         return None
     if words[0] == "api":
-        return apiVerdict(command, arguments[arguments.index("api") + 1:])
+        at = firstPositional(arguments, FORGE_ALL_WITH_VALUE)
+        # the CLI reads a flag before `api` as one of api's own: `gh -X PUT api ...` is a PUT
+        return apiVerdict(command, arguments[:at] + arguments[at + 1:])
     noun, verb = words[0], words[1] if len(words) > 1 else None
     if noun == "auth":
         tokenFlag = any(argument.split("=")[0] in ("-t", "--show-token") for argument in arguments)
@@ -118,22 +139,24 @@ def apiVerdict(command, arguments):
 
 
 def gitVerdict(arguments, aliasOf=None):
+    """aliasOf(name, globalOptions): what an alias of that name runs, read the way git will read it
+    (with the same -C, --git-dir, --work-tree and -c), or None."""
     index = 0
     while index < len(arguments) and arguments[index].startswith("-"):
         option = arguments[index]
         if option == "--config-env" or option.startswith("--config-env="):
             return "git --config-env is not for agents"
         if option == "-c" and index + 1 < len(arguments) and arguments[index + 1].lower().startswith(GIT_CONFIG_REFUSED):
-            return "git -c may not set aliases, remotes, URLs, ssh, hooks or credentials"
+            return "git -c may not set aliases, remotes, URLs, ssh, hooks, includes or credentials"
         index += 2 if option in GIT_GLOBAL_WITH_VALUE else 1
     if index >= len(arguments):
         return None
-    command, rest = arguments[index], arguments[index + 1:]
+    command, rest, globalOptions = arguments[index], arguments[index + 1:], arguments[:index]
     if command in ("push", "send-pack"):
         return "nothing is pushed by an agent: commits stay on the local branch"
     if command == "remote" and positional(rest)[:1] and positional(rest)[0] in ("add", "set-url", "rename"):
         return "agents do not add or change remotes"
-    expansion = aliasOf(command) if aliasOf else None
+    expansion = aliasOf(command, globalOptions) if aliasOf else None
     if expansion and PUSHING.search(expansion):
         return "a git alias that pushes is not for agents"
     return None
@@ -155,9 +178,13 @@ def gitTransport(arguments, gitHosts, pushOpen=False):
         else:
             return False
     rest = arguments[index:]
-    service = rest[1].split(" ", 1)[0] if len(rest) == 2 else None
-    return (len(rest) == 2 and rest[0].rpartition("@")[2] in gitHosts
-            and (service in GIT_FETCHES or (pushOpen and service == "git-receive-pack")))
+    if len(rest) != 2:
+        return False
+    user, _, host = rest[0].rpartition("@")
+    remote = GIT_REMOTE_COMMAND.fullmatch(rest[1])
+    if host not in gitHosts or not GIT_REMOTE_USER.fullmatch(user) or not remote:
+        return False
+    return remote.group(1) in GIT_FETCHES or (pushOpen and remote.group(1) == "git-receive-pack")
 
 
 def realCommand(command, guardDirectory):
@@ -166,12 +193,13 @@ def realCommand(command, guardDirectory):
     return shutil.which(command, path=path)
 
 
-def gitAlias(name, guardDirectory):
+def gitAlias(name, guardDirectory, globalOptions=()):
     real = realCommand("git", guardDirectory)
     if not real:
         return None
     try:
-        found = subprocess.run([real, "config", "--get", "alias.%s" % name], capture_output=True, text=True, timeout=10)
+        found = subprocess.run([real] + list(globalOptions) + ["config", "--get", "alias.%s" % name], capture_output=True,
+                               text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
     if found.returncode != 0:
@@ -207,7 +235,7 @@ def main(arguments):
     command, rest = arguments[0], arguments[1:]
     guardDirectory = os.environ["DRIFTBOARD_GUARD_DIR"]
     gitHosts = [host for host in os.environ.get("DRIFTBOARD_GIT_HOSTS", "").split(",") if host]
-    reason = verdict(command, rest, gitHosts, aliasOf=lambda name: gitAlias(name, guardDirectory),
+    reason = verdict(command, rest, gitHosts, aliasOf=lambda name, options: gitAlias(name, guardDirectory, options),
                      pushOpen=os.environ.get("DRIFTBOARD_GUARD_PUSH") == "1")
     if reason:
         print("driftboard guard: refused %s: %s. If the card needs it, ask the user (driftboard-agent ask)."
