@@ -246,10 +246,13 @@ class Helper:
         run["handledPress"] = pressed.get("at")
         self._save()
         pressed["_cleared"] = True
+        self._clearPress(card["id"], pressed)   # failed: remembered as handled, so the next pass only clears it
+
+    def _clearPress(self, cardId, pressed):
         try:
-            self.board.request("PATCH", "/api/cards/%s" % card["id"], {"pressed": None, "pressedAt": pressed.get("at")})
-        except BoardError as error:   # remembered as handled: the next pass only clears it
-            logger.warning("card %s: could not clear its press: %s", card["id"], error)
+            self.board.request("PATCH", "/api/cards/%s" % cardId, {"pressed": None, "pressedAt": pressed.get("at")})
+        except BoardError as error:
+            logger.warning("card %s: could not clear its press: %s", cardId, error)
 
     def _press(self, card, pressed):
         """Act on a press; False to leave it for a later pass (more agents running than allowed)."""
