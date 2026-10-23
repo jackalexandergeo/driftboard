@@ -529,6 +529,30 @@ class HelperTest(unittest.TestCase):
         self.helper.passOnce()
         self.assertEqual(self.marks()["Inbox"], {"tool": "claude"})
 
+    def testTwoHelpersOnOneBoardStopRewritingEachOthersMarks(self):
+        self.item("Puts the Inbox up")
+        self.board.call("POST", "/api/workspaces", {"name": "Groceries"})
+        config = copy.deepcopy(self.config)
+        config["board"]["workspaces"] = ["Groceries"]
+        state = os.path.join(self.directory.name, "other-state")
+        os.makedirs(state)
+        other = Helper(config, BoardClient(self.board.url, self.board.tokenFile), ClaudeLauncher(self.project, run=FakeClaude([])),
+                       state, clock=lambda: self.now)
+        writes = []
+        for helper in (self.helper, other):
+            def recording(method, path, body=None, request=helper.board.request, **extra):
+                if method == "PATCH" and path.startswith("/api/workspaces/"):
+                    writes.append(path)
+                return request(method, path, body, **extra)
+            helper.board.request = recording
+        for _ in range(5):
+            self.helper.passOnce()
+            other.passOnce()
+        settled = len(writes)
+        self.helper.passOnce()
+        other.passOnce()
+        self.assertEqual(len(writes), settled)
+
     def testABoardThatDoesNotKeepTheMarkIsMarkedOncePerRun(self):
         self.item("Puts the Inbox up")
         sent, request = [], self.helper.board.request

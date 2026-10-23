@@ -55,6 +55,7 @@ ACTIVE = ("working", "idle")
 # ended listing counts only once the session was seen working, or after this long.
 LISTING_GRACE_SECONDS = 30
 CLOSED_KEPT_SECONDS = 7 * 86400   # a closed run (its folders, its registry entry) is forgotten after this
+MARK_WRITES = 3   # a board's mark, set and then set again as often as this in one run: another helper changes it
 
 
 def buttonsFor(run, column=None, terminal=False):
@@ -117,7 +118,8 @@ class Helper:
         except (OSError, ValueError):
             self.state = {"runs": {}}
         self._saved = json.dumps(self.state, indent=1)
-        self._marked = {}   # workspace id -> the mark sent to a board too old to keep it
+        self._marked = {}   # workspace id -> the mark sent to a board too old to keep it, or fought over
+        self._markWrites = {}   # workspace id -> how often this run wrote its mark
         self._relays = {}
         self.terminals = None   # the board's terminals (a TerminalServer), when there are any
         self.terminalsOpen = set()   # cards whose session has a terminal open on the board
@@ -171,7 +173,8 @@ class Helper:
         """The boards the helper watches carry its mark ({tool}), so the page offers the agent
         controls there; one it stopped watching loses it. A mark that went missing (a board
         started from its last good copy) is set again; a board too old to keep one, which says
-        nothing of it in its answer, is asked once per run, not on every pass."""
+        nothing of it in its answer, is asked once per run, not on every pass; one whose mark
+        something else keeps changing back (a second helper on the same board), MARK_WRITES times."""
         mark = {"tool": self.launcher.tool} if watched else None
         if summary.get("agents") == mark or self._marked.get(summary.get("id"), False) == mark:
             return
@@ -180,8 +183,13 @@ class Helper:
         except BoardError as error:
             logger.warning("board %s: could not mark it: %s", summary.get("name"), error)
             return
+        self._markWrites[summary["id"]] = self._markWrites.get(summary["id"], 0) + 1
         if "agents" not in (answer or {}):
             self._marked[summary["id"]] = mark
+        elif self._markWrites[summary["id"]] >= MARK_WRITES:   # it keeps changing back: another helper marks it
+            self._marked[summary["id"]] = mark
+            logger.warning("board %s: something else keeps changing its agents mark (another helper on this board?): "
+                           "left alone until this helper restarts", summary.get("name"))
 
     def _gone(self, onBoards):
         """Runs whose card was deleted, or is no longer on a watched board: the agent stops, its
