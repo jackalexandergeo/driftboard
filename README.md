@@ -252,11 +252,11 @@ each thing worth a card. Tests: `npm run test:helper`.
 **items key** to `<data>/items-key` (readable only by you): the HMAC-SHA256 of
 `driftboard-items` keyed with the token, in hex. It is good for one call only, `POST
 /api/items`, and is refused everywhere else (it cannot read the board, press a button or start
-an agent), so hand it to a tool you trust less than yourself. One exception is yours to make: on
-a board with ⚡ Autostart on, a new item in its first column starts an agent. The pinger reads it from
-`$DRIFTBOARD_ITEMS_KEY_FILE`, else `<data>/items-key`, and falls back to the token only when
-there is no items key (`--token-file` forces the token). It finds the board at `$DRIFTBOARD_URL`
-(default `http://127.0.0.1:4321`).
+an agent), so hand it to a tool you trust less than yourself. One exception is yours to make:
+on a board with ⚡ Autostart on, a new item in its first column starts an agent. The pinger
+reads it from `$DRIFTBOARD_ITEMS_KEY_FILE`, else `<data>/items-key`, and falls back to the
+token only when there is no items key (`--token-file` forces the token). It finds the board at
+`$DRIFTBOARD_URL` (default `http://127.0.0.1:4321`).
 
 **Writing your own, in any language.** Do what the pinger does:
 
@@ -310,9 +310,9 @@ per board and off until you turn it on, and it only meets items that come in whi
 items from before, items a source puts in another column (a question it answered already, a
 review), and cards you make yourself wait for ▶ Start. Nor does it start anything while no
 helper watches the board (it stays on, for when one does again). Started agents take their
-turn like any other (`maxAgents`). Every item a pinger posts there then starts an agent on text someone else
-wrote: agents read a card as data, never as instructions, but turn Autostart on only for
-boards whose sources you would let start one.
+turn like any other (`maxAgents`). Every item a pinger posts there then starts an agent on
+text someone else wrote: agents read a card as data, never as instructions, but turn
+Autostart on only for boards whose sources you would let start one.
 
 The card's chat is the conversation with its agent: what you write there reaches it (pictures
 too), and its answers come back there. Moving the card to Done, Won't do or Completed stops
