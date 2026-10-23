@@ -9,7 +9,6 @@ closes the card.
 """
 
 import argparse
-import datetime
 import json
 import logging
 import os
@@ -83,14 +82,6 @@ def notesOf(card):
     user's own. Not an agent's (they carry `by`): it wrote them."""
     return [attachment for attachment in card.get("attachments") or []
             if attachment.get("type") == "text" and attachment.get("content") and not attachment.get("by")]
-
-
-def createdBefore(note, moment):
-    """Whether the board made the note before `moment` (seconds); one with no readable time counts."""
-    try:
-        return datetime.datetime.fromisoformat(note["createdAt"]).timestamp() < moment
-    except (KeyError, TypeError, ValueError):
-        return True
 
 
 def jsonBlock(value):
@@ -335,8 +326,8 @@ class Helper:
         if not run or run.get("state") in ("waiting", "closed") or not run.get("folder"):
             return
         notes = notesOf(card)
-        if "seenNotes" not in run:   # started before the helper followed notes: what was there then
-            run["seenNotes"] = [note.get("id") for note in notes if createdBefore(note, run.get("startedAt") or 0)]
+        if "seenNotes" not in run:   # started before the helper followed notes: what is there now is not news
+            run["seenNotes"] = [note.get("id") for note in notes]
         seen = set(run["seenNotes"])
         new = [note for note in notes if note.get("id") not in seen]
         if not new:

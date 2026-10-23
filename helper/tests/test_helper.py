@@ -4,7 +4,6 @@ import os
 import subprocess
 import tempfile
 import threading
-import time
 import unittest
 import unittest.mock
 import urllib.error
@@ -306,26 +305,24 @@ class HelperTest(unittest.TestCase):
         self.assertTrue(session["messages"][0].endswith("The user pressed Resume: carry on where you left off."))
         self.assertNotIn("heldNotes", self.helper.state["runs"][cardId])
 
-    def testARunFromBeforeNotesWereFollowedHearsOnlyTheNewOnes(self):
+    def testARunFromBeforeNotesWereFollowedCountsTheNotesThereAsSeen(self):
+        # Live: after the upgrade the helper sent a day-old follow-up and a "lol" as news, and woke the
+        # agent for them.
         self.claude.turns = [[("say", "On it.")], []]
         cardId = self.onThread("Old run", "First.")["cardId"]
-        self.board.call("POST", "/api/cards/%s/attachments" % cardId, {"type": "text", "content": "Known at the start."})
         self.helper.passOnce()
         self.press(cardId, "start")
         self.helper.passOnce()
         self.claude.wait()
-        run = self.helper.state["runs"][cardId]
-        del run["seenNotes"]   # as a run the helper started before it followed notes
-        time.sleep(0.01)
-        run["startedAt"] = time.time()
-        time.sleep(0.01)
-        self.onThread("Follow-up", "After the start.")
-        self.now += 31
+        del self.helper.state["runs"][cardId]["seenNotes"]   # as a run the helper started before it followed notes
+        self.onThread("Follow-up", "From before the upgrade.")
         self.settle()
         session = next(iter(self.claude.sessions.values()))
+        self.assertEqual(session["messages"], [])
+        self.onThread("Follow-up", "After the upgrade.")
+        self.settle()
         self.assertEqual(len(session["messages"]), 1)
-        self.assertIn("After the start.", session["messages"][0])
-        self.assertNotIn("Known at the start.", session["messages"][0])
+        self.assertIn("After the upgrade.", session["messages"][0])
 
     def testContextWhileItWorksWaitsForTheEndOfItsTurn(self):
         cardId = self.item("Busy")
