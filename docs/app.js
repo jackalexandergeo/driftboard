@@ -930,9 +930,10 @@ askOverlay.addEventListener('click', (e) => { if (e.target === askOverlay) close
 // Enter in the topic goes on to the details, as in the page's other fields: a start costs an
 // agent, so only Ctrl/⌘+Enter or the button sends.
 $('ask-form').addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { e.stopPropagation(); closeAsk(); }
-  else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $('ask-form').requestSubmit(); }
-  else if (e.key === 'Enter' && e.target.id === 'ask-title') { e.preventDefault(); $('ask-details').focus(); }
+  if (e.key === 'Escape') { e.stopPropagation(); closeAsk(); return; }
+  if (e.key !== 'Enter' || e.isComposing) return;   // an Enter that picks an input method's word is the input method's
+  if (e.metaKey || e.ctrlKey) { e.preventDefault(); $('ask-form').requestSubmit(); }
+  else if (e.target.id === 'ask-title') { e.preventDefault(); $('ask-details').focus(); }
 });
 $('ask-form').addEventListener('submit', async (e) => {
   e.preventDefault();
