@@ -177,15 +177,15 @@
   </div>
 
   <!-- Ask agent: a new card, made with ▶ Start pressed for the helper -->
-  <div id="request-overlay" class="modal-overlay hidden">
-    <form class="modal input-modal" id="request-form" role="dialog" aria-modal="true" aria-labelledby="request-heading">
-      <h3 id="request-heading" class="input-title">Ask an agent</h3>
-      <input id="request-title" class="text-area request-title" maxlength="200" autocomplete="off" placeholder="What should it look into?" aria-label="What should it look into?" />
-      <textarea id="request-details" class="text-area" rows="6" placeholder="Details: what you know, links, what done looks like (optional, markdown)" aria-label="Details"></textarea>
-      <p class="request-note" id="request-note"></p>
+  <div id="ask-overlay" class="modal-overlay hidden">
+    <form class="modal input-modal" id="ask-form" role="dialog" aria-modal="true" aria-labelledby="ask-heading">
+      <h3 id="ask-heading" class="input-title">Ask an agent</h3>
+      <input id="ask-title" class="text-area ask-title" maxlength="200" autocomplete="off" placeholder="What should it look into?" aria-label="What should it look into?" />
+      <textarea id="ask-details" class="text-area" rows="6" placeholder="Details: what you know, links, what done looks like (optional, markdown)" aria-label="Details"></textarea>
+      <p class="ask-note" id="ask-note"></p>
       <div class="input-actions">
-        <button type="button" class="btn-ghost" id="request-cancel">Cancel</button>
-        <button type="submit" class="btn-primary" id="request-send">Start</button>
+        <button type="button" class="btn-ghost" id="ask-cancel">Cancel</button>
+        <button type="submit" class="btn-primary" id="ask-send">Start</button>
       </div>
     </form>
   </div>

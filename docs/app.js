@@ -910,38 +910,38 @@ $('autostart-toggle').addEventListener('click', async () => {
 
 // Ask agent: a new card with ▶ Start already pressed, where new items land (the first column):
 // the helper starts an agent on it, as on any press, when one is free.
-const requestOverlay = $('request-overlay');
-function closeRequest() { requestOverlay.classList.add('hidden'); }
+const askOverlay = $('ask-overlay');
+function closeAsk() { askOverlay.classList.add('hidden'); }
 $('ask-agent-btn').addEventListener('click', () => {
-  $('request-title').value = '';
-  $('request-details').value = '';
+  $('ask-title').value = '';
+  $('ask-details').value = '';
   const landing = ws.binders[0];
-  $('request-note').textContent = `It goes on this board as a new card${landing ? ` in ${landing.title}` : ''}, and a ${ws.agents.tool} agent starts on it.`;
-  requestOverlay.classList.remove('hidden');
-  $('request-title').focus();
+  $('ask-note').textContent = `It goes on this board as a new card${landing ? ` in ${landing.title}` : ''}, and a ${ws.agents.tool} agent starts on it.`;
+  askOverlay.classList.remove('hidden');
+  $('ask-title').focus();
 });
-$('request-cancel').addEventListener('click', closeRequest);
-requestOverlay.addEventListener('click', (e) => { if (e.target === requestOverlay) closeRequest(); });
-$('request-form').addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { e.stopPropagation(); closeRequest(); }
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('request-form').requestSubmit();
+$('ask-cancel').addEventListener('click', closeAsk);
+askOverlay.addEventListener('click', (e) => { if (e.target === askOverlay) closeAsk(); });
+$('ask-form').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.stopPropagation(); closeAsk(); }
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('ask-form').requestSubmit();
 });
-$('request-form').addEventListener('submit', async (e) => {
+$('ask-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const title = $('request-title').value.trim();
-  if (!title) { $('request-title').focus(); return; }
+  const title = $('ask-title').value.trim();
+  if (!title) { $('ask-title').focus(); return; }
   const landing = ws.binders[0];
   const c = viewCenterWorld();
   const where = landing ? { binderId: landing.id } : { x: snap(Math.round(c.x - 132)), y: snap(Math.round(c.y - 40)) };
-  $('request-send').disabled = true;
+  $('ask-send').disabled = true;
   try {
-    const card = await api('POST', `/api/workspaces/${ws.id}/cards`, { title, description: $('request-details').value, start: true, ...where });
-    closeRequest();
+    const card = await api('POST', `/api/workspaces/${ws.id}/cards`, { title, description: $('ask-details').value, start: true, ...where });
+    closeAsk();
     pendingPopId = card.id;
     await reloadWorkspace();
     toastAction(`Asked an agent: “${title}”`, 'Open', () => openCard(card.id));
   } catch (err) { toast(err.message); }
-  finally { $('request-send').disabled = false; }
+  finally { $('ask-send').disabled = false; }
 });
 
 // ---------- workspaces ----------
@@ -1633,7 +1633,7 @@ document.addEventListener('focusin', (e) => {
 // fields have their own: Escape closes the dialog, Ctrl/Cmd+Enter sends it.
 document.addEventListener('keydown', (e) => {
   const t = e.target;
-  if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA') || t.id === 'input-text' || t.closest?.('#terminal-panel, #request-form')) return;
+  if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA') || t.id === 'input-text' || t.closest?.('#terminal-panel, #ask-form')) return;
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault(); e.stopPropagation();
     t.blur(); // apply — every field saves on blur
