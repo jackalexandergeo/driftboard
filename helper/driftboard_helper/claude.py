@@ -9,6 +9,9 @@ import subprocess
 logger = logging.getLogger(__name__)
 
 SPAWNED = re.compile(r"backgrounded\s+·\s+([0-9a-f]{6,})\s+·")
+BACKGROUNDED = re.compile(r"backgrounded\s+·\s+([0-9a-f]{6,})")
+# --resume on a session that is still in a turn: Claude starts a second session as a copy of it
+COPIED = re.compile(r"started a copy as ([0-9a-f]+)")
 ENDED = ("done", "stopped", "failed")
 # A turn is over when it ended, or is blocked on the user: a session that ends its turn on a
 # question lists as blocked, and so does one waiting for their yes on a command.
@@ -57,6 +60,13 @@ class ClaudeLauncher:
         """Wake a session that ended its turn, under its own id (flags would start a copy)."""
         self._run(["claude", "stop", sessionId], self.directory)
         status, output, errors = self._run(["claude", "--bg", "--resume", fullSessionId, message], self.directory)
+        copied = COPIED.search((output or "") + (errors or ""))
+        if copied:   # it was in a turn after all: a second agent on the card would do its work twice
+            copy = BACKGROUNDED.search(output or "")
+            copyId = copy.group(1) if copy else copied.group(1)
+            self._run(["claude", "stop", copyId], self.directory)
+            raise SessionBusy("session %s is still in a turn; stopped the copy %s that --resume started"
+                              % (sessionId, copyId))
         return self._spawned(status, output, errors)
 
     def stop(self, sessionId):

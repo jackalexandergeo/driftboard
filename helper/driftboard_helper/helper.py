@@ -525,7 +525,11 @@ class Helper:
         if not full:
             raise LaunchError("no full session id for %s yet" % run["session"])
         append(run["outbox"], {"kind": "move", "column": "Working"})   # back at work, off Needs you or Review: before its own reports
-        run["session"] = self.launcher.resume(run["session"], full, message)
+        try:
+            run["session"] = self.launcher.resume(run["session"], full, message)
+        except SessionBusy:
+            self._turnFromTerminal(run)
+            raise
         run.update(state="working", turnAt=self._clock(), seenWorking=False, asked=False, approvalShown=False)
         logger.info("card %s: woke its agent", cardId)
 

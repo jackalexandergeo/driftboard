@@ -9,7 +9,7 @@ import unittest.mock
 import urllib.error
 
 from driftboard_helper.board import BoardClient, BoardError
-from driftboard_helper.claude import ClaudeLauncher
+from driftboard_helper.claude import ClaudeLauncher, SessionBusy
 from driftboard_helper.config import DEFAULTS
 from driftboard_helper.helper import CONTEXT, REPLY, RESUME, START, STOP, TERMINAL, Helper, passSafely
 
@@ -810,6 +810,23 @@ class HelperTest(unittest.TestCase):
         with open(os.path.join(run["folder"], "settings.json")) as settingsFile:   # where its session reads them
             settings = json.load(settingsFile)
         self.assertEqual(settings["env"]["CLAUDE_ENV_FILE"], os.path.join(run["control"], "session-env.sh"))
+
+
+class ClaudeLauncherTest(unittest.TestCase):
+    def testAResumeThatStartsACopyStopsTheCopyAndTheMessageWaits(self):
+        # Live: --resume on a session still in a turn printed this, and the helper took it for a wake
+        # that failed, so it woke the session once more.
+        calls = []
+
+        def run(command, workingDirectory):
+            calls.append(command)
+            if command[1:3] == ["--bg", "--resume"]:
+                return 0, ("backgrounded · 7d9d0914\n  claude attach 7d9d0914    open in this terminal\n"
+                           "note: session d25cc0a8 is already running in the background, so this started a copy as 7d9d\n"), ""
+            return 0, "", ""
+        with self.assertRaises(SessionBusy):
+            ClaudeLauncher("/tmp", run=run).resume("d25cc0a8", "d25cc0a8-full", "New on the card")
+        self.assertEqual(calls[-1], ["claude", "stop", "7d9d0914"])
 
 
 if __name__ == "__main__":
