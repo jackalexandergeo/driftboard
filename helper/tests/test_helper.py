@@ -786,6 +786,27 @@ class HelperTest(unittest.TestCase):
         self.helper.passOnce()
         self.assertEqual(len(self.claude.sessions), 2)
 
+    def moveTo(self, cardId, column):
+        workspace = self.board.call("GET", "/api/workspaces/%s" % self.board.call("GET", "/api/cards/%s" % cardId)["workspaceId"])
+        binder = next(binder for binder in workspace["binders"] if binder["title"] == column)
+        self.board.call("POST", "/api/cards/%s/move" % cardId, {"binderId": binder["id"]})
+
+    def testAStartWaitingItsTurnIsDroppedWhenTheUserClosesTheCard(self):
+        self.helper = self.newHelper(maxAgents=1)
+        first, second = self.item("First"), self.item("Second")
+        self.helper.passOnce()
+        self.press(first, "start")
+        self.press(second, "start")
+        self.helper.passOnce()   # the second waits its turn
+        self.moveTo(second, "Won't do")
+        self.helper.passOnce()
+        self.assertIsNone(self.card(second).get("pressed"))
+        self.press(first, "stop")
+        self.moveTo(second, "New")   # back, as a later item on its thread brings it
+        self.helper.passOnce()
+        self.helper.passOnce()
+        self.assertEqual((len(self.claude.sessions), self.buttons(second)), (1, [START["id"], CONTEXT["id"]]))
+
     def testAnAgentWhoseTurnEndedHoldsNoSlot(self):
         self.helper = self.newHelper(maxAgents=1)
         first, second = self.item("First"), self.item("Second")

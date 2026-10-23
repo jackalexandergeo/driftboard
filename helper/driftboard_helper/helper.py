@@ -224,6 +224,9 @@ class Helper:
             del runs[card["id"]]   # deleted, then brought back: a card like any other again (▶ Start)
             run = None
         if column in CLOSED_COLUMNS:
+            pressed = card.get("pressed") or {}
+            if pressed.get("button") in OWN_BUTTONS:   # closed before the helper took it (a start waiting its
+                self._clearPress(card["id"], pressed)  # turn, say): dropped, not kept for when the card comes back
             if run and run.get("state") != "closed":
                 self._close(card["id"], run)
         else:
