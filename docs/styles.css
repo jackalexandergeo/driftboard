@@ -289,6 +289,8 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .tool-btn.active { background: rgba(231, 97, 37, 0.14); color: var(--orange); }
 .zoom-label { font-variant-numeric: tabular-nums; min-width: 52px; justify-content: center; color: var(--gray); }
 .tool-divider { width: 1px; align-self: stretch; background: var(--border); margin: 4px 3px; }
+/* a phone's width: the tools as icons (each keeps its title), so the agent tools fit too */
+@media (max-width: 640px) { .tool-btn span { display: none; } .tool-btn { padding: 7px 9px; } }
 
 .locked {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 20;
