@@ -20,6 +20,11 @@ class LaunchError(Exception):
     pass
 
 
+class SessionBusy(LaunchError):
+    """The session is in a turn (the user woke it from a terminal, say): a message for it waits for
+    the turn to end, and nothing stops or copies it."""
+
+
 def runCommand(command, workingDirectory):
     """(exit status, stdout, stderr). Tests replace this."""
     try:

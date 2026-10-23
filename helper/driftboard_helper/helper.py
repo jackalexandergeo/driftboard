@@ -19,7 +19,7 @@ import sys
 import time
 
 from .board import BoardClient, BoardError
-from .claude import TURN_OVER, ClaudeLauncher, LaunchError
+from .claude import TURN_OVER, ClaudeLauncher, LaunchError, SessionBusy
 from .config import configProblems, loadConfig, stateDirectory
 from .guard import writeGuards
 from .outbox import append
@@ -503,21 +503,37 @@ class Helper:
             return
         try:
             self._wake(cardId, run, message)
+        except SessionBusy:
+            run.setdefault("queued", []).append(message)
+            logger.info("card %s: its agent is in a turn; the message waits for it to end", cardId)
         except LaunchError as error:
             run.setdefault("queued", []).append(message)
             logger.warning("card %s: could not wake its agent, kept the message for later: %s", cardId, error)
 
     def _wake(self, cardId, run, message):
+        # Listed now, not as of the last pass: the user may have woken it from a terminal since (the
+        # helper never sees that), and a wake stops the session before it resumes it.
+        listing = self.launcher.states()
+        listed = (listing or {}).get(run["session"])
+        if listed and listed[0] == "working":
+            self._turnFromTerminal(run)
+            raise SessionBusy("its session %s is in a turn" % run["session"])
         if not run.get("control"):   # started before the control folder: its session reads the old path
             run.update(control=self._controlFolder(cardId), settingsPath=os.path.join(run["folder"], "settings.json"))
         self._writeSettings(run["folder"], run["outbox"], run["control"], run.get("settingsPath"))   # the config as it is now
-        full = run.get("fullSession") or (self._states or {}).get(run["session"], (None, None))[1]
+        full = run.get("fullSession") or (listed or (None, None))[1] or (self._states or {}).get(run["session"], (None, None))[1]
         if not full:
             raise LaunchError("no full session id for %s yet" % run["session"])
         append(run["outbox"], {"kind": "move", "column": "Working"})   # back at work, off Needs you or Review: before its own reports
         run["session"] = self.launcher.resume(run["session"], full, message)
         run.update(state="working", turnAt=self._clock(), seenWorking=False, asked=False, approvalShown=False)
         logger.info("card %s: woke its agent", cardId)
+
+    def _turnFromTerminal(self, run):
+        """The session is in a turn the helper did not start (the user typed to it in a terminal): it
+        counts as working, so messages wait for that turn to end, and so do notes held for ▶ Resume."""
+        run.setdefault("queued", []).extend(run.pop("heldNotes", None) or [])
+        run.update(state="working", turnAt=self._clock(), seenWorking=True, asked=False, approvalShown=False)
 
     def _close(self, cardId, run):
         if run.get("state") in ACTIVE:
@@ -569,6 +585,9 @@ class Helper:
                 message = "\n\n".join(run.pop("queued"))
                 try:
                     self._wake(cardId, run, message)
+                except SessionBusy:   # held notes it moved to the queue stay there, after this
+                    run["queued"] = [message] + (run.get("queued") or [])
+                    logger.info("card %s: its agent is in a turn; the messages wait for it to end", cardId)
                 except LaunchError as error:
                     run["queued"] = [message]
                     logger.warning("card %s: could not wake its agent: %s", cardId, error)
@@ -587,6 +606,9 @@ class Helper:
         listed = (self._states or {}).get(run["session"])
         if listed and listed[1]:
             run["fullSession"] = listed[1]
+        if listed and listed[0] == "working" and run["state"] in ("idle", "stopped"):
+            self._turnFromTerminal(run)
+            logger.info("card %s: its agent is in a turn the helper did not start (from a terminal)", cardId)
         if listed and listed[0] == "working":
             run["seenWorking"] = True
         settled = (run.get("seenWorking") or not getattr(self.launcher, "listingsLag", False)

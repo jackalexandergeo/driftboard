@@ -324,6 +324,57 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(len(session["messages"]), 1)
         self.assertIn("After the upgrade.", session["messages"][0])
 
+    def wokenFromATerminal(self, cardId):
+        """The agent's turn is over; then the user types to it in a terminal (claude attach)."""
+        self.helper.passOnce()
+        self.press(cardId, "start")
+        self.helper.passOnce()
+        self.claude.wait()
+        self.now += 31
+        self.helper.passOnce()
+        self.assertEqual(self.helper.state["runs"][cardId]["state"], "idle")
+        session = next(iter(self.claude.sessions.values()))
+        session["state"] = "working"
+        return session
+
+    def stops(self, session):
+        key = next(key for key, value in self.claude.sessions.items() if value is session)
+        return [call for call in self.claude.calls if call[1:3] == ["stop", key]]
+
+    def testATurnFromATerminalHoldsMessagesUntilItEnds(self):
+        # Live: the user typed to an agent in the board's terminal; the helper still counted it idle, and a
+        # wake stopped that turn half way.
+        self.claude.turns = [[("say", "On it.")], []]
+        cardId = self.item("Driven from a terminal")
+        session = self.wokenFromATerminal(cardId)
+        self.helper.passOnce()
+        self.assertEqual(self.helper.state["runs"][cardId]["state"], "working")
+        self.assertEqual(self.buttons(cardId), [STOP["id"], CONTEXT["id"], TERMINAL["id"]])
+        self.board.call("POST", "/api/cards/%s/chat" % cardId, {"text": "Also check May."})
+        self.helper.passOnce()
+        self.assertEqual((session["messages"], self.stops(session)), ([], []))   # its turn goes on
+        session["state"] = "done"
+        self.helper.passOnce()
+        self.claude.wait()
+        self.assertEqual(session["messages"], ["The user says: Also check May."])
+
+    def testAWakeRightAfterARestartLeavesATurnFromATerminalAlone(self):
+        # Live: the helper restarted while the user had the agent at work from a terminal, found a note for
+        # it on its first pass (before it had listed the sessions), and woke it.
+        self.claude.turns = [[("say", "On it.")], []]
+        cardId = self.onThread("Restarted", "First.")["cardId"]
+        session = self.wokenFromATerminal(cardId)
+        self.onThread("Follow-up", "Later news.")
+        self.helper = self.newHelper()   # restarted: the state on disk still says idle
+        self.helper.passOnce()
+        self.assertEqual((session["messages"], self.stops(session)), ([], []))
+        self.assertEqual(len(self.claude.sessions), 1)   # and no copy
+        session["state"] = "done"
+        self.helper.passOnce()
+        self.claude.wait()
+        self.assertEqual(len(session["messages"]), 1)
+        self.assertIn("Later news.", session["messages"][0])
+
     def testContextWhileItWorksWaitsForTheEndOfItsTurn(self):
         cardId = self.item("Busy")
         self.helper.passOnce()
