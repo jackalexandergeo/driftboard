@@ -117,7 +117,7 @@ class Helper:
         except (OSError, ValueError):
             self.state = {"runs": {}}
         self._saved = json.dumps(self.state, indent=1)
-        self._marked = {}   # workspace id -> the mark this process last set on it
+        self._marked = {}   # workspace id -> the mark sent to a board too old to keep it
         self._relays = {}
         self.terminals = None   # the board's terminals (a TerminalServer), when there are any
         self.terminalsOpen = set()   # cards whose session has a terminal open on the board
@@ -169,16 +169,19 @@ class Helper:
 
     def _mark(self, summary, watched):
         """The boards the helper watches carry its mark ({tool}), so the page offers the agent
-        controls there; one it stopped watching loses it. Set once per run: a board too old to
-        keep the mark is not written to on every pass."""
+        controls there; one it stopped watching loses it. A mark that went missing (a board
+        started from its last good copy) is set again; a board too old to keep one, which says
+        nothing of it in its answer, is asked once per run, not on every pass."""
         mark = {"tool": self.launcher.tool} if watched else None
         if summary.get("agents") == mark or self._marked.get(summary.get("id"), False) == mark:
             return
         try:
-            self.board.request("PATCH", "/api/workspaces/%s" % summary["id"], {"agents": mark})
-            self._marked[summary["id"]] = mark
+            answer = self.board.request("PATCH", "/api/workspaces/%s" % summary["id"], {"agents": mark})
         except BoardError as error:
             logger.warning("board %s: could not mark it: %s", summary.get("name"), error)
+            return
+        if "agents" not in (answer or {}):
+            self._marked[summary["id"]] = mark
 
     def _gone(self, onBoards):
         """Runs whose card was deleted, or is no longer on a watched board: the agent stops, its

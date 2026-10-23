@@ -522,6 +522,13 @@ class HelperTest(unittest.TestCase):
         self.helper.passOnce()
         self.assertEqual([path for method, path, _body in sent if path.startswith("/api/workspaces/") and method == "PATCH"], [])
 
+    def testAMarkThatWentMissingIsSetAgain(self):
+        self.item("Puts the Inbox up")
+        self.helper.passOnce()
+        self.board.call("PATCH", "/api/workspaces/%s" % self.inbox()["id"], {"agents": None})   # a board restored, say
+        self.helper.passOnce()
+        self.assertEqual(self.marks()["Inbox"], {"tool": "claude"})
+
     def testABoardThatDoesNotKeepTheMarkIsMarkedOncePerRun(self):
         self.item("Puts the Inbox up")
         sent, request = [], self.helper.board.request
