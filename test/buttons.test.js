@@ -59,6 +59,23 @@ test('a card asked of an agent is made with ▶ Start pressed, and its details',
   assert.equal((await make({ title: 'Set aside', binderId: done.id })).status, 201);
 });
 
+test('a ▶ Start still waiting goes when the card is closed; another script\'s press stays', async () => {
+  const { workspaceId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Puts the Inbox up' }, board.token)).body;
+  const workspace = (await call(board, 'GET', `/api/workspaces/${workspaceId}`, undefined, board.token)).body;
+  const column = (title) => workspace.binders.find((binder) => binder.title === title).id;
+  const waiting = (await call(board, 'POST', `/api/workspaces/${workspaceId}/cards`,
+    { title: 'Waits for a free agent', start: true, binderId: column('New') }, board.token)).body;
+  await call(board, 'POST', `/api/cards/${waiting.id}/move`, { binderId: column('Working') }, board.token);
+  assert.equal((await call(board, 'GET', `/api/cards/${waiting.id}`, undefined, board.token)).body.card.pressed.button, 'start');
+  await call(board, 'POST', `/api/cards/${waiting.id}/move`, { binderId: column("Won't do") }, board.token);
+  assert.equal((await call(board, 'GET', `/api/cards/${waiting.id}`, undefined, board.token)).body.card.pressed, undefined);
+  const { cardId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Approve the refund' }, board.token)).body;
+  await call(board, 'PATCH', `/api/cards/${cardId}`, { buttons: [{ id: 'approve', label: 'Approve' }] }, board.token);
+  await call(board, 'POST', `/api/cards/${cardId}/press`, { button: 'approve' }, board.token);
+  await call(board, 'POST', `/api/cards/${cardId}/move`, { binderId: column('Done') }, board.token);
+  assert.equal((await call(board, 'GET', `/api/cards/${cardId}`, undefined, board.token)).body.card.pressed.button, 'approve');
+});
+
 test('three buttons on the card, and two more in the open card with place "open"', async () => {
   const { cardId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Many buttons' }, board.token)).body;
   const button = (id, place) => ({ id, label: id, ...(place ? { place } : {}) });

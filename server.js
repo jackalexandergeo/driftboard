@@ -1170,6 +1170,9 @@ app.post('/api/cards/:id/move', (req, res) => {
     if (req.body.y !== undefined) card.y = Number(req.body.y);
   }
   if (fromBinderId && fromBinderId !== card.binderId) reindexBinder(ws, fromBinderId);
+  // Nothing starts on a card the user closed: a ▶ Start still waiting for a free agent goes, so
+  // the card does not start when it comes back (a later item on its thread reopens it).
+  if (targetBinder && CLOSED_COLUMNS.includes(targetBinder.title) && card.pressed?.button === 'start') delete card.pressed;
   card.updatedAt = now();
   persist();
   res.json({ ok: true });
