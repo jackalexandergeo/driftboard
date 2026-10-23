@@ -309,7 +309,8 @@ const TOKEN = loadToken();
 const UPLOADS_KEY = createHmac('sha256', TOKEN).update('uploads').digest('hex');
 // A pinger (a chat watcher, a CI job, another tool's script) holds this key, not the token: it
 // opens POST /api/items and nothing else, so it can put items on the board but cannot read
-// cards, press Start or mint card tokens. Written next to the token, private, at every start.
+// cards, press Start or mint card tokens. (On a board where the user turned Autostart on, the
+// user's standing ▶ Start meets each new item.) Written next to the token, private, at every start.
 const ITEMS_KEY = createHmac('sha256', TOKEN).update('driftboard-items').digest('hex');
 fs.writeFileSync(`${ITEMS_KEY_FILE}.tmp`, ITEMS_KEY + '\n', { mode: 0o600 });
 fs.renameSync(`${ITEMS_KEY_FILE}.tmp`, ITEMS_KEY_FILE);
@@ -754,13 +755,19 @@ const TOOL_NAME = /^[a-z][a-z0-9._-]{0,19}$/;
 app.patch('/api/workspaces/:id', (req, res) => {
   const ws = getWorkspace(req.params.id);
   if (!ws) return res.status(404).json({ error: 'workspace not found' });
-  const { agents } = req.body;
+  const { agents, autoStart } = req.body;
   if (agents !== undefined && agents !== null && !(typeof agents.tool === 'string' && TOOL_NAME.test(agents.tool))) {
     return res.status(400).json({ error: 'agents is {tool: the agent tool, e.g. "claude"} or null' });
+  }
+  if (autoStart !== undefined && typeof autoStart !== 'boolean') {
+    return res.status(400).json({ error: 'autoStart must be true or false: whether an agent starts on each new item' });
   }
   if (typeof req.body.name === 'string' && req.body.name.trim()) ws.name = req.body.name.trim();
   if (agents) ws.agents = { tool: agents.tool };
   else if (agents === null) delete ws.agents;
+  // The user's Autostart: each new item that lands in the first column comes with ▶ Start pressed.
+  if (autoStart === true) ws.autoStart = true;
+  else if (autoStart === false) delete ws.autoStart;
   if (req.body.view && typeof req.body.view === 'object') {
     ws.view = {
       panX: Number(req.body.view.panX) || 0,
@@ -769,7 +776,7 @@ app.patch('/api/workspaces/:id', (req, res) => {
     };
   }
   persist();
-  res.json({ id: ws.id, name: ws.name, view: ws.view, agents: ws.agents || null });
+  res.json({ id: ws.id, name: ws.name, view: ws.view, agents: ws.agents || null, autoStart: !!ws.autoStart });
 });
 
 app.delete('/api/workspaces/:id', async (req, res) => {
@@ -969,6 +976,9 @@ app.post('/api/items', (req, res) => {
   }
   const ws = existing || itemWorkspace(wanted);
   const binder = (item.column && ws.binders.find((b) => b.title === item.column.trim())) || ws.binders[0] || null;
+  // Autostart (the user's, on this board): new work, where new items land, gets an agent.
+  // An item a source put further along (an answered question, a review) does not.
+  const autoStarted = !!ws.autoStart && !!binder && binder === ws.binders[0] && !CLOSED_COLUMNS.includes(binder.title);
   const card = {
     id: randomUUID(),
     title: item.title.trim(),
@@ -978,6 +988,7 @@ app.post('/api/items', (req, res) => {
     order: binder ? ws.cards.filter((c) => c.binderId === binder.id).length : 0,
     x: 80, y: 80,
     source: { name: source, ...(item.thread ? { thread: item.thread } : {}) },
+    ...(autoStarted ? { pressed: { button: 'start', at: now() } } : {}),
     createdAt: now(),
     updatedAt: now(),
   };
@@ -988,7 +999,7 @@ app.post('/api/items', (req, res) => {
   remember(card);
   ws.cards.push(card);
   persist();
-  res.status(201).json({ cardId: card.id, workspaceId: ws.id, created: true });
+  res.status(201).json({ cardId: card.id, workspaceId: ws.id, created: true, ...(autoStarted ? { autoStarted: true } : {}) });
 });
 
 // The user writes to the card's agent (from the open card, or a script on their behalf), with

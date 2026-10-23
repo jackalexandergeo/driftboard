@@ -182,6 +182,16 @@ class HelperTest(unittest.TestCase):
         with open(os.path.join(session["env"]["DRIFTBOARD_RUN"], "card.md")) as cardFile:
             self.assertIn('"Since Tuesday, by about 4 minutes."', cardFile.read())
 
+    def testWithAutostartOnANewItemGetsAnAgentWithoutAPress(self):
+        self.item("Came before Autostart")
+        self.board.call("PATCH", "/api/workspaces/%s" % self.inbox()["id"], {"autoStart": True})
+        cardId = self.item("Nightly build failed")
+        further = self.board.call("POST", "/api/items", {"source": "test", "title": "Reviewed already", "column": "Review"})["cardId"]
+        self.helper.passOnce()
+        self.assertEqual(len(self.claude.sessions), 1)
+        self.assertEqual(self.board.column(cardId), "Working")
+        self.assertEqual(self.buttons(further), [START["id"], CONTEXT["id"]])
+
     def testTheCardsChatReachesTheAgentAndItsAnswersComeBack(self):
         # The user: "make the chat feature look like a chat ... interact once the ticket is open".
         self.claude.turns = [[("say", "Starting on the ledger.")], [("say", "Done: 2 mismatches.")]]

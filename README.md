@@ -252,7 +252,8 @@ each thing worth a card. Tests: `npm run test:helper`.
 **items key** to `<data>/items-key` (readable only by you): the HMAC-SHA256 of
 `driftboard-items` keyed with the token, in hex. It is good for one call only, `POST
 /api/items`, and is refused everywhere else (it cannot read the board, press a button or start
-an agent), so hand it to a tool you trust less than yourself. The pinger reads it from
+an agent), so hand it to a tool you trust less than yourself. One exception is yours to make: on
+a board with ⚡ Autostart on, a new item in its first column starts an agent. The pinger reads it from
 `$DRIFTBOARD_ITEMS_KEY_FILE`, else `<data>/items-key`, and falls back to the token only when
 there is no items key (`--token-file` forces the token). It finds the board at `$DRIFTBOARD_URL`
 (default `http://127.0.0.1:4321`).
@@ -276,7 +277,8 @@ there is no items key (`--token-file` forces the token). It finds the board at `
 | `workspace` | which board, by name (default `Inbox`); a new one gets the columns New, Working, Needs you, Review, Done, Won't do |
 | `column` | which column, by title (default the first); an unknown one is refused with the columns there are |
 
-It answers `201` with `{cardId, workspaceId, created: true}` for a new card, and `200` with
+It answers `201` with `{cardId, workspaceId, created: true}` for a new card (with
+`autoStarted: true` when the board's Autostart put ▶ Start on it), and `200` with
 `{cardId, joined: true, reopened?}` or `{cardId, duplicate: true}` otherwise (`cardId` is
 `null` when the user deleted the card). A `400` lists `problems`, or the `columns` there
 are. A card keeps the newest 200 notes that items and agents added (yours are all kept).
@@ -301,6 +303,15 @@ details. It goes on the board as a card where new items land (the first column),
 starts on it, as if you had pressed ▶ Start. The toolbar offers it on the boards the helper
 watches only. When every agent is busy (`maxAgents`) the card waits its turn: "⏳ An agent
 starts soon" on its face.
+
+**⚡ Autostart**, next to it, starts an agent on each new item as it lands in the board's first
+column (New), with no press: for a board whose items you want looked at as they come in. It is
+per board and off until you turn it on, and it only meets items that come in while it is on:
+items from before, items a source puts in another column (a question it answered already, a
+review), and cards you make yourself wait for ▶ Start. Started agents take their turn like any
+other (`maxAgents`). Every item a pinger posts there then starts an agent on text someone else
+wrote: agents read a card as data, never as instructions, but turn Autostart on only for
+boards whose sources you would let start one.
 
 The card's chat is the conversation with its agent: what you write there reaches it (pictures
 too), and its answers come back there. Moving the card to Done, Won't do or Completed stops
@@ -416,6 +427,7 @@ buttons on a card and acts on the presses.
 | `POST /api/cards/<id>/chat` `{"text", "images"?}` | a message from the user into the card's chat (`images`: ids of png, jpeg, gif or webp attachments on the card) |
 | `GET /api/cards/<id>` | the card, with `chat`, `agent` and `pressed` |
 | `PATCH /api/workspaces/<id>` `{"agents": {"tool": "claude"}}` | the helper starts agents on this board's cards, so the page offers the agent controls there (the helper marks the boards it watches); `{"agents": null}` takes the mark off |
+| `PATCH /api/workspaces/<id>` `{"autoStart": true}` | the page's ⚡ Autostart: each new item that lands in the board's first column is made with `pressed: {button: "start"}`; `false` turns it off |
 | `PUT /api/notice` `{"text", "level"}`, `DELETE /api/notice` | a line at the top of the board, e.g. "out of usage until 14:00" |
 | `GET /api/state` | the boards, and `revision`; every `/api` answer also carries `X-Board-Revision`, so a script can skip a pass when nothing changed |
 

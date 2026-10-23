@@ -141,6 +141,22 @@ test('what is not an item is refused, saying why', async () => {
     'source is required: lowercase letters, digits, . _ - (who sent it, e.g. "ci")', 'link.url must be an http or https address']);
 });
 
+test('with Autostart on, a new item where items land comes with ▶ Start pressed, and no other', async () => {
+  const before = await send(open, { source: 'ci', title: 'Came before Autostart', workspace: 'Builds' });
+  const autoStart = async (value) => (await fetch(`${open.url}/api/workspaces/${before.body.workspaceId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoStart: value }) }));
+  assert.equal((await autoStart('yes')).status, 400);
+  assert.equal((await (await autoStart(true)).json()).autoStart, true);
+  const landed = await send(open, { source: 'ci', title: 'Nightly build failed', workspace: 'Builds' });
+  const further = await send(open, { source: 'ci', title: 'Reviewed already', workspace: 'Builds', column: 'Review' });
+  assert.deepEqual([landed.body.autoStarted, (await card(open, landed.body.cardId)).pressed.button], [true, 'start']);
+  assert.deepEqual([further.body.autoStarted, (await card(open, further.body.cardId)).pressed], [undefined, undefined]);
+  assert.equal((await card(open, before.body.cardId)).pressed, undefined);
+  assert.equal((await (await autoStart(false)).json()).autoStart, false);
+  const after = await send(open, { source: 'ci', title: 'Failed again', workspace: 'Builds' });
+  assert.equal((await card(open, after.body.cardId)).pressed, undefined);
+});
+
 test('the items key puts items on the board and does nothing else', async () => {
   const file = path.join(locked.data, 'items-key');
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);

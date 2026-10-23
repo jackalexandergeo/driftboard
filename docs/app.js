@@ -887,7 +887,26 @@ $('add-binder-btn').addEventListener('click', async () => {
 function updateAgentTools() {
   const offered = !DEMO && !!ws?.agents;
   document.querySelectorAll('.agent-tool').forEach((el) => el.classList.toggle('hidden', !offered));
+  if (!offered) return;
+  const toggle = $('autostart-toggle');
+  const landing = ws.binders[0]?.title || 'the first column';
+  toggle.classList.toggle('active', !!ws.autoStart);
+  toggle.setAttribute('aria-pressed', String(!!ws.autoStart));
+  toggle.title = ws.autoStart
+    ? `Autostart is on: an agent starts on each new item that lands in ${landing}. Click to turn it off.`
+    : `Autostart is off: click to start an agent on each new item as it lands in ${landing}.`;
 }
+
+// Autostart: the board meets each new item in its first column with ▶ Start pressed (server.js).
+$('autostart-toggle').addEventListener('click', async () => {
+  try {
+    const saved = await api('PATCH', `/api/workspaces/${ws.id}`, { autoStart: !ws.autoStart });
+    if (saved.autoStart) ws.autoStart = true; else delete ws.autoStart;
+    updateAgentTools();
+    const landing = ws.binders[0]?.title || 'the first column';
+    toast(saved.autoStart ? `Autostart on: each new item in ${landing} gets an agent` : 'Autostart off: new items wait for ▶ Start');
+  } catch (err) { toast(err.message); }
+});
 
 // Ask agent: a new card with ▶ Start already pressed, where new items land (the first column):
 // the helper starts an agent on it, as on any press, when one is free.
