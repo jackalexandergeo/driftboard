@@ -39,6 +39,21 @@ class AccessTest(unittest.TestCase):
         self.assertIn("Never write to a code host", " ".join(rulesFor(limits={"codeHost": "never"})))
         self.assertEqual(unguarded(None, {"codeHost": "never", "push": "never"}), [])
 
+    def testWithChatApprovalsTheAgentAsksInWritingInsteadOfClaudePrompting(self):
+        # The user: "if i say its ok in the chat that should be enough ... i hate hitting yes everytime".
+        access = {"mc": "ask", "ssh": "deny"}
+        permissions = claudePermissions(access, limits={"chat": "never"}, approvals="chat")
+        self.assertNotIn("ask", permissions)   # no prompts
+        for rule in ("Bash(git *push*)", "Bash(glab *mr create*)", "Bash(mc *)"):
+            self.assertNotIn(rule, permissions.get("allow", []) + permissions["deny"])
+        self.assertIn("Read(~/.ssh/**)", permissions["deny"])   # never stays never
+        self.assertTrue(any(rule.startswith("Bash(ssh") for rule in permissions["deny"]))
+        held = " ".join(guidanceFor(access, {"chat": "never"}, approvals="chat"))
+        self.assertIn("said yes to it in writing", held)
+        self.assertIn("driftboard-agent ask", held)
+        self.assertIn("You may run mc once the user has said yes", held)
+        self.assertIn("Never post", " ".join(rulesFor(access, limits={"chat": "never"}, approvals="chat")))
+
     def testThisMachinesSecretsFollowTheCredentialsLimitAndTheStateIsNeverEdited(self):
         home = os.path.expanduser("~")
         secrets = [(os.path.join(home, ".local/share/driftboard/token"), False), ("/srv/board", True)]

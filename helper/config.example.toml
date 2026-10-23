@@ -20,6 +20,8 @@ gitHosts = []                  # hosts git may reach over ssh, e.g. ["github.com
                                # pushing as agent.limits.push says
 rules = []                     # your own hard rules, e.g. ["Never touch the production ledger."]
 denyCommands = []              # extra Claude Code deny rules, e.g. ["Bash(chat-cli *send*)"]
+approvals = "prompt"            # what is at "ask": "prompt", approve each command; "chat", the agent asks in
+                                #   writing and your written yes covers that work (auto mode still checks it)
 
 [terminal]                     # an agent's session, from its open card
 app = ""                       # what ↗ Open in a window opens: "terminator", ["kitty", "--hold", "{command}"];

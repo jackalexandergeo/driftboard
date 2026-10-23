@@ -13,6 +13,8 @@
     gitHosts = []                   # hosts git may fetch from over ssh, e.g. ["github.com"]
     rules = []                      # your own hard rules, for every agent
     denyCommands = []               # extra Claude Code deny rules, e.g. ["Bash(chat-cli *send*)"]
+    approvals = "prompt"            # what is at "ask": "prompt" (approve each command) or "chat" (the agent
+                                    # asks in writing and goes ahead on your written yes)
 
     [agent.access]                  # other machines, per command: "deny" (default), "ask" or "allow"
     ssh = "deny"
@@ -25,13 +27,13 @@ import copy
 import os
 import tomllib
 
-from .rules import ACCESS_LEVELS, COMMAND_NAME, DEFAULT_LIMITS, LIMIT_LEVELS
+from .rules import ACCESS_LEVELS, APPROVALS, COMMAND_NAME, DEFAULT_LIMITS, LIMIT_LEVELS
 
 TOOLS = ("claude", "codex")
 DEFAULTS = {
     "board": {"url": "http://127.0.0.1:4321", "tokenFile": "~/.local/share/driftboard/token", "workspaces": ["Inbox"]},
     "agent": {"tool": "claude", "directory": "", "model": "", "maxAgents": 1, "gitHosts": [], "rules": [],
-              "denyCommands": [], "access": {}, "limits": {}},
+              "denyCommands": [], "approvals": "prompt", "access": {}, "limits": {}},
     # app: the terminal ↗ Terminal opens ("terminator", or ["kitty", "--hold", "{command}"]); empty: the
     # system's default. board: the terminal in the board page (Linux and macOS).
     "terminal": {"app": "", "board": True},
@@ -89,6 +91,8 @@ def configProblems(config):
     for key in ("gitHosts", "rules", "denyCommands"):
         if not isinstance(agent.get(key), list) or not all(isinstance(item, str) for item in agent[key]):
             problems.append("agent.%s must be a list of text" % key)
+    if agent.get("approvals") not in APPROVALS:
+        problems.append("agent.approvals = %r: each %s" % (agent.get("approvals"), ", ".join(APPROVALS)))
     access = agent.get("access")
     if not isinstance(access, dict):
         problems.append("agent.access must be a table")

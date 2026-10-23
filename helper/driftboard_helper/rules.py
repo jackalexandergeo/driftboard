@@ -63,6 +63,13 @@ def accessCommands(access):
 #          user to approve each such command (Codex, which cannot ask, just goes ahead when told)
 #   allow  as the agent sees fit
 LIMIT_LEVELS = ("never", "ask", "allow")
+# How an agent gets the user's yes for what is at "ask": "prompt", Claude Code asks them to approve each
+# command; "chat", the agent asks in writing and goes ahead once the user says yes in writing (no prompts:
+# auto mode still weighs each command against what the user said).
+APPROVALS = ("prompt", "chat")
+ASK_IN_WRITING = ("Ask first with driftboard-agent ask, saying exactly what you will run and why, then stop; go ahead "
+                  "once the user says yes in writing (in the card's chat, this session or the card). Their yes covers every "
+                  "command the work you asked about takes, so do not ask again for each one; other work needs its own yes.")
 DEFAULT_LIMITS = {"chat": "ask", "codeHost": "ask", "push": "ask", "http": "ask", "credentials": "never"}
 LIMIT_TEXTS = {
     "chat": "post, send, reply to, edit, delete, react to or schedule anything in chat, mail or calendars (Slack, Teams, "
@@ -105,13 +112,17 @@ def limitPatterns(secrets=()):
             "credentials": credentials}
 
 
-def limitRules(limits):
+def limitRules(limits, approvals="prompt"):
     """(hard, soft): limits at never, as hard rules; at ask, as what the agent holds back until the user asks."""
     limits = limitsOf(limits)
     hard = ["Never %s." % LIMIT_TEXTS[kind] for kind in LIMIT_TEXTS if limits[kind] == "never"]
     held = [LIMIT_TEXTS[kind] for kind in LIMIT_TEXTS if limits[kind] == "ask"]
-    soft = (["Unless the user asks you to (in this session or on the card), do not %s. When they do ask, go ahead "
-             "(Claude Code asks them to approve each such command)." % "; nor ".join(held)] if held else [])
+    if not held:
+        return hard, []
+    if approvals == "chat":
+        return hard, ["Unless the user has said yes to it in writing, do not %s. %s" % ("; nor ".join(held), ASK_IN_WRITING)]
+    soft = ["Unless the user asks you to (in this session or on the card), do not %s. When they do ask, go ahead "
+            "(Claude Code asks them to approve each such command)." % "; nor ".join(held)]
     return hard, soft
 
 
@@ -147,14 +158,17 @@ def accessPermissions(access):
     return rules
 
 
-def accessRules(access):
+def accessRules(access, approvals="prompt"):
     named = {level: [command for command in accessCommands(access) if accessOf(access, command) == level]
              for level in ACCESS_LEVELS}
     rules = []
     if named["deny"]:
         rules.append("Never run %s, and never reach another machine another way (a script, a tunnel, another tool). If the "
                      "card needs one, ask the user with driftboard-agent ask, giving the exact command." % ", ".join(named["deny"]))
-    if named["ask"]:
+    if named["ask"] and approvals == "chat":
+        rules.append("You may run %s once the user has said yes to it in writing. %s Read; change nothing on the other "
+                     "machine unless the user tells you to." % (", ".join(named["ask"]), ASK_IN_WRITING))
+    elif named["ask"]:
         rules.append("You may run %s when the card needs it: every use waits for the user's yes, so say first in one line "
                      "what it is for. Read; change nothing on the other machine unless the user tells you to."
                      % ", ".join(named["ask"]))
@@ -164,21 +178,23 @@ def accessRules(access):
     return rules
 
 
-def rulesFor(access=None, userRules=(), limits=None):
+def rulesFor(access=None, userRules=(), limits=None, approvals="prompt"):
     """The hard rules, which nothing said lifts: the helper's own, limits at never, commands the user
     denied, and the user's own rules."""
-    hard, _soft = limitRules(limits)
-    return list(HARD_RULES) + hard + [rule for rule in accessRules(access) if rule.startswith("Never")] + list(userRules)
+    hard, _soft = limitRules(limits, approvals)
+    return (list(HARD_RULES) + hard + [rule for rule in accessRules(access, approvals) if rule.startswith("Never")]
+            + list(userRules))
 
 
-def guidanceFor(access=None, limits=None):
+def guidanceFor(access=None, limits=None, approvals="prompt"):
     """What the agent holds back until the user asks for it."""
-    _hard, soft = limitRules(limits)
-    return soft + [rule for rule in accessRules(access) if not rule.startswith("Never")]
+    _hard, soft = limitRules(limits, approvals)
+    return soft + [rule for rule in accessRules(access, approvals) if not rule.startswith("Never")]
 
 
-def claudePermissions(access=None, extraDeny=(), limits=None, secrets=(), protected=()):
-    """{"deny": [...], "ask"?: [...], "allow"?: [...]} for a Claude Code session's settings.
+def claudePermissions(access=None, extraDeny=(), limits=None, secrets=(), protected=(), approvals="prompt"):
+    """{"deny": [...], "ask"?: [...], "allow"?: [...]} for a Claude Code session's settings. With approvals
+    "chat", nothing at "ask" gets a rule: the agent asks in writing instead of Claude Code prompting.
     secrets: (path, is a folder) read only as the credentials limit says; protected: (path, is a
     folder) never edited (the helper's own state and the run's settings)."""
     permissions = accessPermissions(access)
@@ -186,8 +202,10 @@ def claudePermissions(access=None, extraDeny=(), limits=None, secrets=(), protec
     for kind, patterns in limitPatterns(secrets).items():
         if limits[kind] == "never":
             permissions["deny"] = patterns + permissions["deny"]
-        elif limits[kind] == "ask":
+        elif limits[kind] == "ask" and approvals != "chat":
             permissions["ask"] = patterns + permissions["ask"]
+    if approvals == "chat":
+        permissions["ask"] = []
     edits = ["Edit(/%s%s)" % (path, "/**" if folder else "") for path, folder in protected]
     deny = permissions["deny"] + edits + list(extraDeny)
     return {"deny": deny, **{level: permissions[level] for level in ("ask", "allow") if permissions[level]}}
