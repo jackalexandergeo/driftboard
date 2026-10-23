@@ -302,7 +302,7 @@ the board:
 details. It goes on the board as a card where new items land (the first column), and an agent
 starts on it, as if you had pressed ▶ Start. The toolbar offers it on the boards the helper
 watches only. When every agent is busy (`maxAgents`) the card waits its turn: "⏳ An agent
-starts soon" on its face.
+starts soon" on its face, and after a minute "⏳ Waiting for a free agent, or for the helper".
 
 **⚡ Autostart**, next to it, starts an agent on each new item as it lands in the board's first
 column (New), with no press: for a board whose items you want looked at as they come in. It is

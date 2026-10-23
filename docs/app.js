@@ -478,11 +478,13 @@ function cardBadges(card) {
 }
 
 // What the card's agent last said, for the card's face: its question first, else its progress.
-// Before that, a ▶ Start the helper has not taken yet (pressed, or asked for with Ask agent).
+// Before that, on a board a helper watches, a ▶ Start it has not taken yet (pressed, or asked
+// for with Ask agent): soon, and after a minute (`until`) waiting.
 function cardAgentLine(card) {
-  if (card.pressed?.button === 'start') {
+  if (card.pressed?.button === 'start' && ws.agents) {
     const waited = Date.now() - Date.parse(card.pressed.at || '');
-    return { text: waited < PRESS_PATIENCE ? '⏳ An agent starts soon' : '⏳ Waiting for a free agent, or for the helper', asks: false };
+    return waited < PRESS_PATIENCE ? { text: '⏳ An agent starts soon', asks: false, until: PRESS_PATIENCE - waited }
+      : { text: '⏳ Waiting for a free agent, or for the helper', asks: false };
   }
   const agent = card.agent;
   if (!agent) return null;
@@ -585,6 +587,9 @@ function makeCardEl(card, free) {
   const agentEl = el.querySelector('.card-agent');
   const agentLine = cardAgentLine(card);
   if (agentLine) { agentEl.textContent = agentLine.text; agentEl.classList.toggle('asks', agentLine.asks); } else agentEl.remove();
+  if (agentLine?.until) {   // nothing redraws an idle board: the line moves on by itself, like a waiting button
+    setTimeout(() => { const later = cardAgentLine(card); if (agentEl.isConnected && later) agentEl.textContent = later.text; }, agentLine.until + 50);
+  }
   const descEl = el.querySelector('.card-desc');
   const preview = stripMd(card.description);
   if (preview) descEl.textContent = preview; else descEl.remove();
