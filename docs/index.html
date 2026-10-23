@@ -43,6 +43,11 @@
         <svg viewBox="0 0 24 24"><path d="M4 6h6l2 2h8v10H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
         <span>Binder</span>
       </button>
+      <div class="tool-divider agent-tool hidden"></div>
+      <button class="tool-btn agent-tool hidden" id="ask-agent-btn" title="Ask an agent to look into something new: it gets a card of its own and starts on it">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16v11H10l-5 4v-4H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 8v5M9.5 10.5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Ask agent</span>
+      </button>
       <div class="tool-divider"></div>
       <button class="tool-btn" id="snap-toggle" title="Snap to grid">
         <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z M4 9h16 M4 14h16 M9 4v16 M14 4v16" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
@@ -163,6 +168,20 @@
       <div class="input-actions">
         <button type="button" class="btn-ghost" id="input-cancel">Cancel</button>
         <button type="submit" class="btn-primary" id="input-send">Send</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Ask agent: a new card, made with ▶ Start pressed for the helper -->
+  <div id="request-overlay" class="modal-overlay hidden">
+    <form class="modal input-modal" id="request-form" role="dialog" aria-modal="true" aria-labelledby="request-heading">
+      <h3 id="request-heading" class="input-title">Ask an agent</h3>
+      <input id="request-title" class="text-area request-title" maxlength="200" autocomplete="off" placeholder="What should it look into?" aria-label="What should it look into?" />
+      <textarea id="request-details" class="text-area" rows="6" placeholder="Details: what you know, links, what done looks like (optional, markdown)" aria-label="Details"></textarea>
+      <p class="request-note" id="request-note"></p>
+      <div class="input-actions">
+        <button type="button" class="btn-ghost" id="request-cancel">Cancel</button>
+        <button type="submit" class="btn-primary" id="request-send">Start</button>
       </div>
     </form>
   </div>

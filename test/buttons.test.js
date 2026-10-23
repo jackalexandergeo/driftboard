@@ -44,6 +44,17 @@ test('a script clears only the press it handled; a newer one waits for it', asyn
   assert.equal((await call(board, 'PATCH', `/api/cards/${cardId}`, { pressedAt: 'x' }, board.token)).status, 400);
 });
 
+test('a card asked of an agent is made with ▶ Start pressed, and its details', async () => {
+  const { workspaceId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Puts the Inbox up' }, board.token)).body;
+  const make = (body) => call(board, 'POST', `/api/workspaces/${workspaceId}/cards`, body, board.token);
+  const asked = await make({ title: 'Why did the nightly build slow down?', description: '  Since Tuesday.  ', start: true });
+  assert.deepEqual([asked.status, asked.body.description, asked.body.pressed.button], [201, 'Since Tuesday.', 'start']);
+  const plain = await make({ title: 'Just a card' });
+  assert.deepEqual([plain.status, plain.body.description, plain.body.pressed], [201, '', undefined]);
+  assert.equal((await make({ title: 'x', start: 'yes' })).status, 400);
+  assert.equal((await make({ title: 'x', description: 7 })).status, 400);
+});
+
 test('three buttons on the card, and two more in the open card with place "open"', async () => {
   const { cardId } = (await call(board, 'POST', '/api/items', { source: 'test', title: 'Many buttons' }, board.token)).body;
   const button = (id, place) => ({ id, label: id, ...(place ? { place } : {}) });

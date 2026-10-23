@@ -467,6 +467,7 @@ function renderWorkspace() {
   ws.cards.filter((c) => !c.binderId).forEach((c) => world.appendChild(makeCardEl(c, true)));
   pendingPopId = null;
   droppedId = null;
+  updateAgentTools();
 }
 
 function cardBadges(card) {
@@ -477,7 +478,12 @@ function cardBadges(card) {
 }
 
 // What the card's agent last said, for the card's face: its question first, else its progress.
+// Before that, a ▶ Start the helper has not taken yet (pressed, or asked for with Ask agent).
 function cardAgentLine(card) {
+  if (card.pressed?.button === 'start') {
+    const waited = Date.now() - Date.parse(card.pressed.at || '');
+    return { text: waited < PRESS_PATIENCE ? '⏳ An agent starts soon' : '⏳ Waiting for a free agent, or for the helper', asks: false };
+  }
   const agent = card.agent;
   if (!agent) return null;
   if (agent.question) return { text: `❗ ${agent.question}`, asks: true };
@@ -528,7 +534,7 @@ function waitingButton(b, button, pressedAt) {
     return;
   }
   b.disabled = false; b.classList.remove('pending'); b.classList.add('stale');
-  b.title = `Pressed ${ago(waited)} and nothing picked it up: the helper (or whatever script looks after this card) may not be running. Press again to retry.`;
+  b.title = `Pressed ${ago(waited)} and nothing picked it up: every agent may be busy (the helper's maxAgents), or the helper (or whatever script looks after this card) may not be running. Press again to retry.`;
 }
 
 // A card's buttons: those for its face, or (where 'open') those for the open card only.
@@ -873,6 +879,50 @@ $('add-binder-btn').addEventListener('click', async () => {
     await reloadWorkspace();
     openBinderEditor(b.id, true); // new binder → jump straight to naming it
   } catch (e) { toast(e.message); }
+});
+
+// ---------- agents ----------
+// The agent controls show on a board the helper watches (it marks it: ws.agents) and nowhere
+// else, so a board without the helper stays a plain board.
+function updateAgentTools() {
+  const offered = !DEMO && !!ws?.agents;
+  document.querySelectorAll('.agent-tool').forEach((el) => el.classList.toggle('hidden', !offered));
+}
+
+// Ask agent: a new card with ▶ Start already pressed, where new items land (the first column):
+// the helper starts an agent on it, as on any press, when one is free.
+const requestOverlay = $('request-overlay');
+function closeRequest() { requestOverlay.classList.add('hidden'); }
+$('ask-agent-btn').addEventListener('click', () => {
+  $('request-title').value = '';
+  $('request-details').value = '';
+  const landing = ws.binders[0];
+  $('request-note').textContent = `It goes on this board as a new card${landing ? ` in ${landing.title}` : ''}, and a ${ws.agents.tool} agent starts on it.`;
+  requestOverlay.classList.remove('hidden');
+  $('request-title').focus();
+});
+$('request-cancel').addEventListener('click', closeRequest);
+requestOverlay.addEventListener('click', (e) => { if (e.target === requestOverlay) closeRequest(); });
+$('request-form').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.stopPropagation(); closeRequest(); }
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('request-form').requestSubmit();
+});
+$('request-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const title = $('request-title').value.trim();
+  if (!title) { $('request-title').focus(); return; }
+  const landing = ws.binders[0];
+  const c = viewCenterWorld();
+  const where = landing ? { binderId: landing.id } : { x: snap(Math.round(c.x - 132)), y: snap(Math.round(c.y - 40)) };
+  $('request-send').disabled = true;
+  try {
+    const card = await api('POST', `/api/workspaces/${ws.id}/cards`, { title, description: $('request-details').value, start: true, ...where });
+    closeRequest();
+    pendingPopId = card.id;
+    await reloadWorkspace();
+    toastAction(`Asked an agent: “${title}”`, 'Open', () => openCard(card.id));
+  } catch (err) { toast(err.message); }
+  finally { $('request-send').disabled = false; }
 });
 
 // ---------- workspaces ----------
@@ -1560,11 +1610,11 @@ document.addEventListener('focusin', (e) => {
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) t.dataset.origValue = t.value;
 });
-// Capture phase so this runs before the per-field / modal Escape handlers. The text dialog's
-// field has its own: Escape closes the dialog, Ctrl/Cmd+Enter sends it.
+// Capture phase so this runs before the per-field / modal Escape handlers. The text dialogs'
+// fields have their own: Escape closes the dialog, Ctrl/Cmd+Enter sends it.
 document.addEventListener('keydown', (e) => {
   const t = e.target;
-  if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA') || t.id === 'input-text' || t.closest?.('#terminal-panel')) return;
+  if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA') || t.id === 'input-text' || t.closest?.('#terminal-panel, #request-form')) return;
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault(); e.stopPropagation();
     t.blur(); // apply — every field saves on blur

@@ -841,21 +841,30 @@ app.delete('/api/binders/:id', (req, res) => {
 });
 
 // ---- Cards ----
+// {title, description?, binderId?, x?, y?, start?}. start: the user asks an agent to take the card
+// on (Ask agent): it is made with ▶ Start pressed, for the helper to act on as on any press.
 app.post('/api/workspaces/:id/cards', (req, res) => {
   const ws = getWorkspace(req.params.id);
   if (!ws) return res.status(404).json({ error: 'workspace not found' });
   const title = (req.body.title || '').trim();
   if (!title) return res.status(400).json({ error: 'title is required' });
+  if (req.body.description !== undefined && typeof req.body.description !== 'string') {
+    return res.status(400).json({ error: 'description must be text' });
+  }
+  if (req.body.start !== undefined && typeof req.body.start !== 'boolean') {
+    return res.status(400).json({ error: 'start must be true or false: whether an agent starts on the card' });
+  }
   const binderId = ws.binders.some((b) => b.id === req.body.binderId) ? req.body.binderId : null;
   const card = {
     id: randomUUID(),
     title,
-    description: '',
+    description: (req.body.description || '').trim(),
     attachments: [],
     binderId,
     order: binderId ? ws.cards.filter((c) => c.binderId === binderId).length : 0,
     x: Number(req.body.x) || 80,
     y: Number(req.body.y) || 80,
+    ...(req.body.start ? { pressed: { button: 'start', at: now() } } : {}),
     createdAt: now(),
     updatedAt: now(),
   };

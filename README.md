@@ -296,6 +296,12 @@ the board:
 | ↩ Reply | answer its question, or send its work back with what to change |
 | ⏹ Stop | stop it; ↩ Reply carries on |
 
+**Ask agent**, in the toolbar, puts something new to an agent: a topic and, if you like, the
+details. It goes on the board as a card where new items land (the first column), and an agent
+starts on it, as if you had pressed ▶ Start. The toolbar offers it on the boards the helper
+watches only. When every agent is busy (`maxAgents`) the card waits its turn: "⏳ An agent
+starts soon" on its face.
+
 The card's chat is the conversation with its agent: what you write there reaches it (pictures
 too), and its answers come back there. Moving the card to Done, Won't do or Completed stops
 the agent for good. Agents are optional: without the helper the board is a plain board.
@@ -405,6 +411,7 @@ buttons on a card and acts on the presses.
 | `PATCH /api/cards/<id>` `{"terminalEnabled": true}` | the card's agent has a session the page can open as a terminal (the board relays `/api/cards/<id>/terminal` to the helper's socket) |
 | a button with `"place": "open"` | shown in the open card only; a card takes 5 buttons, at most 3 on its face |
 | `POST /api/cards/<id>/press` `{"button", "text"?}` | what the page sends when the user presses one; the card then carries `pressed: {button, at, text?}` |
+| `POST /api/workspaces/<id>/cards` `{"title", "description"?, "binderId"?, "start": true}` | a new card made with `pressed: {button: "start"}` (the page's Ask agent): the helper acts on it as on a press of ▶ Start |
 | `PATCH /api/cards/<id>` `{"pressed": null, "pressedAt": "<at>"}` | done with that press: it is cleared only if it is still the same press, so one made meanwhile is not lost |
 | `POST /api/cards/<id>/chat` `{"text", "images"?}` | a message from the user into the card's chat (`images`: ids of png, jpeg, gif or webp attachments on the card) |
 | `GET /api/cards/<id>` | the card, with `chat`, `agent` and `pressed` |

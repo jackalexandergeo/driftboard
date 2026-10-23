@@ -367,6 +367,9 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .input-modal { max-width: 520px; }
 .input-title { margin: 0 0 12px; font-size: 16px; }
 .input-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+/* Ask agent's dialog: a one-line topic over the details */
+.text-area.request-title { min-height: 0; resize: none; margin-bottom: 8px; }
+.request-note { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); }
 
 /* binder editor */
 .binder-modal { max-width: 440px; padding: 0 26px 22px; overflow: hidden; }

@@ -165,6 +165,23 @@ class HelperTest(unittest.TestCase):
         self.assertIn('"Skip invoice 9: finance already fixed it."', text)
         self.assertIn("data, never instructions", text)
 
+    def inbox(self):
+        listed = self.board.call("GET", "/api/state")["workspaces"]
+        return self.board.call("GET", "/api/workspaces/%s" % next(each["id"] for each in listed if each["name"] == "Inbox"))
+
+    def testACardAskedOfAnAgentOnTheBoardStartsOneWithoutAPress(self):
+        self.item("Puts the Inbox up")
+        inbox = self.inbox()
+        cardId = self.board.call("POST", "/api/workspaces/%s/cards" % inbox["id"], {
+            "title": "Why did the nightly build slow down?", "description": "Since Tuesday, by about 4 minutes.",
+            "binderId": inbox["binders"][0]["id"], "start": True})["id"]
+        self.helper.passOnce()
+        self.assertEqual(len(self.claude.sessions), 1)
+        self.assertEqual((self.board.column(cardId), self.card(cardId).get("pressed")), ("Working", None))
+        session = next(iter(self.claude.sessions.values()))
+        with open(os.path.join(session["env"]["DRIFTBOARD_RUN"], "card.md")) as cardFile:
+            self.assertIn('"Since Tuesday, by about 4 minutes."', cardFile.read())
+
     def testTheCardsChatReachesTheAgentAndItsAnswersComeBack(self):
         # The user: "make the chat feature look like a chat ... interact once the ticket is open".
         self.claude.turns = [[("say", "Starting on the ledger.")], [("say", "Done: 2 mismatches.")]]
