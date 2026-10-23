@@ -701,7 +701,7 @@ app.get('/api/session', (req, res) => {
 app.get('/api/state', (req, res) => {
   res.json({
     activeWorkspaceId: state.activeWorkspaceId,
-    workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name })),
+    workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name, ...(w.agents ? { agents: w.agents } : {}) })),
     notice: state.notice || null,
     revision,
   });
@@ -748,10 +748,19 @@ app.post('/api/workspaces', (req, res) => {
   res.status(201).json(ws);
 });
 
+// The helper says which boards it starts agents on ({tool}), and that it no longer does (null):
+// the page offers the agent controls on those boards only.
+const TOOL_NAME = /^[a-z][a-z0-9._-]{0,19}$/;
 app.patch('/api/workspaces/:id', (req, res) => {
   const ws = getWorkspace(req.params.id);
   if (!ws) return res.status(404).json({ error: 'workspace not found' });
+  const { agents } = req.body;
+  if (agents !== undefined && agents !== null && !(typeof agents.tool === 'string' && TOOL_NAME.test(agents.tool))) {
+    return res.status(400).json({ error: 'agents is {tool: the agent tool, e.g. "claude"} or null' });
+  }
   if (typeof req.body.name === 'string' && req.body.name.trim()) ws.name = req.body.name.trim();
+  if (agents) ws.agents = { tool: agents.tool };
+  else if (agents === null) delete ws.agents;
   if (req.body.view && typeof req.body.view === 'object') {
     ws.view = {
       panX: Number(req.body.view.panX) || 0,
@@ -760,7 +769,7 @@ app.patch('/api/workspaces/:id', (req, res) => {
     };
   }
   persist();
-  res.json({ id: ws.id, name: ws.name, view: ws.view });
+  res.json({ id: ws.id, name: ws.name, view: ws.view, agents: ws.agents || null });
 });
 
 app.delete('/api/workspaces/:id', async (req, res) => {

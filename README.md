@@ -408,6 +408,7 @@ buttons on a card and acts on the presses.
 | `PATCH /api/cards/<id>` `{"pressed": null, "pressedAt": "<at>"}` | done with that press: it is cleared only if it is still the same press, so one made meanwhile is not lost |
 | `POST /api/cards/<id>/chat` `{"text", "images"?}` | a message from the user into the card's chat (`images`: ids of png, jpeg, gif or webp attachments on the card) |
 | `GET /api/cards/<id>` | the card, with `chat`, `agent` and `pressed` |
+| `PATCH /api/workspaces/<id>` `{"agents": {"tool": "claude"}}` | the helper starts agents on this board's cards, so the page offers the agent controls there (the helper marks the boards it watches); `{"agents": null}` takes the mark off |
 | `PUT /api/notice` `{"text", "level"}`, `DELETE /api/notice` | a line at the top of the board, e.g. "out of usage until 14:00" |
 | `GET /api/state` | the boards, and `revision`; every `/api` answer also carries `X-Board-Revision`, so a script can skip a pass when nothing changed |
 

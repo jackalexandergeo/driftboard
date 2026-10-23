@@ -481,6 +481,33 @@ class HelperTest(unittest.TestCase):
         self.helper.board.request = recording
         return sent
 
+    def marks(self):
+        return {each["name"]: each.get("agents") for each in self.board.call("GET", "/api/state")["workspaces"]}
+
+    def testTheBoardsItWatchesCarryItsMarkAndNoOthers(self):
+        self.item("Puts the Inbox up")
+        groceries = self.board.call("POST", "/api/workspaces", {"name": "Groceries"})
+        self.board.call("PATCH", "/api/workspaces/%s" % groceries["id"], {"agents": {"tool": "codex"}})   # watched before
+        self.helper.passOnce()
+        self.assertEqual(self.marks(), {"My Board": None, "Inbox": {"tool": "claude"}, "Groceries": None})
+        sent = self.recordRequests()
+        self.helper.passOnce()
+        self.assertEqual([path for method, path, _body in sent if path.startswith("/api/workspaces/") and method == "PATCH"], [])
+
+    def testABoardThatDoesNotKeepTheMarkIsMarkedOncePerRun(self):
+        self.item("Puts the Inbox up")
+        sent, request = [], self.helper.board.request
+
+        def olderBoard(method, path, body=None, **extra):   # takes the PATCH, keeps nothing of it
+            if method == "PATCH" and path.startswith("/api/workspaces/"):
+                sent.append(path)
+                return {}
+            return request(method, path, body, **extra)
+        self.helper.board.request = olderBoard
+        self.helper.passOnce()
+        self.helper.passOnce()
+        self.assertEqual(len(sent), 1)
+
     def testTheHelpersCardsOpenTheirChat(self):
         cardId = self.item("Chat with me")
         sent = self.recordRequests()

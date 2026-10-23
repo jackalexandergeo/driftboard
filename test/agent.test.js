@@ -158,6 +158,18 @@ test('an agent changing code moves to Coding, or Clauding; a board without eithe
   assert.equal(await columnOf(cardId, workspaceId), 'Clauding');
 });
 
+test('the helper marks the boards it starts agents on, and takes the mark off again', async () => {
+  const { workspaceId } = await newCard('Puts the Inbox up');
+  const mark = (agents) => call(board, 'PATCH', `/api/workspaces/${workspaceId}`, { agents }, board.token);
+  const listed = async () => (await call(board, 'GET', '/api/state', undefined, board.token)).body.workspaces
+    .find((each) => each.id === workspaceId);
+  const marked = await mark({ tool: 'claude' });
+  assert.deepEqual([marked.status, marked.body.agents, (await listed()).agents], [200, { tool: 'claude' }, { tool: 'claude' }]);
+  for (const agents of [{}, { tool: 'Claude Code' }, { tool: 7 }, 'claude']) assert.equal((await mark(agents)).status, 400);
+  assert.equal((await mark(null)).body.agents, null);
+  assert.equal((await listed()).agents, undefined);
+});
+
 test('only a holder of the board token mints a card token', async () => {
   const { cardId } = await newCard('Mint');
   assert.equal((await call(board, 'POST', `/api/cards/${cardId}/agent`, {})).status, 401);
