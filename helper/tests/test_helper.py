@@ -184,6 +184,7 @@ class HelperTest(unittest.TestCase):
 
     def testWithAutostartOnANewItemGetsAnAgentWithoutAPress(self):
         self.item("Came before Autostart")
+        self.helper.passOnce()   # marks the Inbox: watched
         self.board.call("PATCH", "/api/workspaces/%s" % self.inbox()["id"], {"autoStart": True})
         cardId = self.item("Nightly build failed")
         further = self.board.call("POST", "/api/items", {"source": "test", "title": "Reviewed already", "column": "Review"})["cardId"]

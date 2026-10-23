@@ -143,9 +143,11 @@ test('what is not an item is refused, saying why', async () => {
 
 test('with Autostart on, a new item where items land comes with ▶ Start pressed, and no other', async () => {
   const before = await send(open, { source: 'ci', title: 'Came before Autostart', workspace: 'Builds' });
-  const autoStart = async (value) => (await fetch(`${open.url}/api/workspaces/${before.body.workspaceId}`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoStart: value }) }));
+  const change = (body) => fetch(`${open.url}/api/workspaces/${before.body.workspaceId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const autoStart = (value) => change({ autoStart: value });
   assert.equal((await autoStart('yes')).status, 400);
+  await change({ agents: { tool: 'claude' } });   // a helper watches the board
   assert.equal((await (await autoStart(true)).json()).autoStart, true);
   const landed = await send(open, { source: 'ci', title: 'Nightly build failed', workspace: 'Builds' });
   const further = await send(open, { source: 'ci', title: 'Reviewed already', workspace: 'Builds', column: 'Review' });
@@ -155,6 +157,18 @@ test('with Autostart on, a new item where items land comes with ▶ Start presse
   assert.equal((await (await autoStart(false)).json()).autoStart, false);
   const after = await send(open, { source: 'ci', title: 'Failed again', workspace: 'Builds' });
   assert.equal((await card(open, after.body.cardId)).pressed, undefined);
+});
+
+test('Autostart starts nothing while no helper watches the board, and is still on when one does again', async () => {
+  const first = await send(open, { source: 'ci', title: 'Puts Unwatched up', workspace: 'Unwatched' });
+  const change = (body) => fetch(`${open.url}/api/workspaces/${first.body.workspaceId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  await change({ agents: { tool: 'claude' }, autoStart: true });
+  assert.equal((await (await change({ agents: null })).json()).autoStart, true);   // the helper let go of it
+  const meanwhile = await send(open, { source: 'ci', title: 'Came while unwatched', workspace: 'Unwatched' });
+  assert.deepEqual([meanwhile.body.autoStarted, (await card(open, meanwhile.body.cardId)).pressed], [undefined, undefined]);
+  await change({ agents: { tool: 'claude' } });
+  assert.equal((await send(open, { source: 'ci', title: 'Watched again', workspace: 'Unwatched' })).body.autoStarted, true);
 });
 
 test('the items key puts items on the board and does nothing else', async () => {
@@ -171,6 +185,12 @@ test('the items key puts items on the board and does nothing else', async () => 
   assert.equal((await fetch(`${locked.url}/api/state`, asKey)).status, 401);
   assert.equal((await fetch(`${locked.url}/api/cards/${taken.body.cardId}`, asKey)).status, 401);
   assert.equal((await fetch(`${locked.url}/api/cards/${taken.body.cardId}/agent`, { method: 'POST', body: '{}', ...asKey })).status, 401);
+  // nor turn Autostart on, mark a board as watched, or make a card with ▶ Start pressed
+  const board = `${locked.url}/api/workspaces/${taken.body.workspaceId}`;
+  for (const body of [{ autoStart: true }, { agents: { tool: 'claude' } }]) {
+    assert.equal((await fetch(board, { method: 'PATCH', body: JSON.stringify(body), ...asKey })).status, 401);
+  }
+  assert.equal((await fetch(`${board}/cards`, { method: 'POST', body: JSON.stringify({ title: 'x', start: true }), ...asKey })).status, 401);
   assert.equal((await fetch(`${locked.url}/api/hello?nonce=${nonce}&key=token`)).status, 400);
 });
 

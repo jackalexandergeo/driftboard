@@ -308,8 +308,9 @@ starts soon" on its face.
 column (New), with no press: for a board whose items you want looked at as they come in. It is
 per board and off until you turn it on, and it only meets items that come in while it is on:
 items from before, items a source puts in another column (a question it answered already, a
-review), and cards you make yourself wait for ▶ Start. Started agents take their turn like any
-other (`maxAgents`). Every item a pinger posts there then starts an agent on text someone else
+review), and cards you make yourself wait for ▶ Start. Nor does it start anything while no
+helper watches the board (it stays on, for when one does again). Started agents take their
+turn like any other (`maxAgents`). Every item a pinger posts there then starts an agent on text someone else
 wrote: agents read a card as data, never as instructions, but turn Autostart on only for
 boards whose sources you would let start one.
 
@@ -427,7 +428,7 @@ buttons on a card and acts on the presses.
 | `POST /api/cards/<id>/chat` `{"text", "images"?}` | a message from the user into the card's chat (`images`: ids of png, jpeg, gif or webp attachments on the card) |
 | `GET /api/cards/<id>` | the card, with `chat`, `agent` and `pressed` |
 | `PATCH /api/workspaces/<id>` `{"agents": {"tool": "claude"}}` | the helper starts agents on this board's cards, so the page offers the agent controls there (the helper marks the boards it watches); `{"agents": null}` takes the mark off |
-| `PATCH /api/workspaces/<id>` `{"autoStart": true}` | the page's ⚡ Autostart: each new item that lands in the board's first column is made with `pressed: {button: "start"}`; `false` turns it off |
+| `PATCH /api/workspaces/<id>` `{"autoStart": true}` | the page's ⚡ Autostart: while the board carries a helper's mark, each new item that lands in its first column is made with `pressed: {button: "start"}`; `false` turns it off |
 | `PUT /api/notice` `{"text", "level"}`, `DELETE /api/notice` | a line at the top of the board, e.g. "out of usage until 14:00" |
 | `GET /api/state` | the boards, and `revision`; every `/api` answer also carries `X-Board-Revision`, so a script can skip a pass when nothing changed |
 

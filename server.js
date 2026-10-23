@@ -977,8 +977,9 @@ app.post('/api/items', (req, res) => {
   const ws = existing || itemWorkspace(wanted);
   const binder = (item.column && ws.binders.find((b) => b.title === item.column.trim())) || ws.binders[0] || null;
   // Autostart (the user's, on this board): new work, where new items land, gets an agent.
-  // An item a source put further along (an answered question, a review) does not.
-  const autoStarted = !!ws.autoStart && !!binder && binder === ws.binders[0] && !CLOSED_COLUMNS.includes(binder.title);
+  // An item a source put further along (an answered question, a review) does not, and nothing
+  // does while no helper watches the board (no mark): presses would pile up for a later helper.
+  const autoStarted = !!ws.autoStart && !!ws.agents && binder === ws.binders[0] && !CLOSED_COLUMNS.includes(binder.title);
   const card = {
     id: randomUUID(),
     title: item.title.trim(),
