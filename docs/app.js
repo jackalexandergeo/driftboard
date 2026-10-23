@@ -916,18 +916,22 @@ $('ask-agent-btn').addEventListener('click', () => {
   $('ask-title').value = '';
   $('ask-details').value = '';
   const landing = ws.binders[0];
-  $('ask-note').textContent = `It goes on this board as a new card${landing ? ` in ${landing.title}` : ''}, and a ${ws.agents.tool} agent starts on it.`;
+  $('ask-note').textContent = `It goes on this board as a new card${landing ? ` in ${landing.title}` : ''}, and a ${ws.agents.tool} agent starts on it. Ctrl/⌘+Enter starts it.`;
   askOverlay.classList.remove('hidden');
   $('ask-title').focus();
 });
 $('ask-cancel').addEventListener('click', closeAsk);
 askOverlay.addEventListener('click', (e) => { if (e.target === askOverlay) closeAsk(); });
+// Enter in the topic goes on to the details, as in the page's other fields: a start costs an
+// agent, so only Ctrl/⌘+Enter or the button sends.
 $('ask-form').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { e.stopPropagation(); closeAsk(); }
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('ask-form').requestSubmit();
+  else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $('ask-form').requestSubmit(); }
+  else if (e.key === 'Enter' && e.target.id === 'ask-title') { e.preventDefault(); $('ask-details').focus(); }
 });
 $('ask-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if ($('ask-send').disabled) return;   // one card per Start: requestSubmit() does not wait for the last one
   const title = $('ask-title').value.trim();
   if (!title) { $('ask-title').focus(); return; }
   const landing = ws.binders[0];
