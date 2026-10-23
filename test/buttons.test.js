@@ -53,6 +53,10 @@ test('a card asked of an agent is made with ▶ Start pressed, and its details',
   assert.deepEqual([plain.status, plain.body.description, plain.body.pressed], [201, '', undefined]);
   assert.equal((await make({ title: 'x', start: 'yes' })).status, 400);
   assert.equal((await make({ title: 'x', description: 7 })).status, 400);
+  const workspace = (await call(board, 'GET', `/api/workspaces/${workspaceId}`, undefined, board.token)).body;
+  const done = workspace.binders.find((binder) => binder.title === 'Done');
+  assert.equal((await make({ title: 'Set aside', start: true, binderId: done.id })).status, 400);   // never taken there
+  assert.equal((await make({ title: 'Set aside', binderId: done.id })).status, 201);
 });
 
 test('three buttons on the card, and two more in the open card with place "open"', async () => {

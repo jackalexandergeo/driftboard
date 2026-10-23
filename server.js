@@ -862,6 +862,9 @@ app.post('/api/workspaces/:id/cards', (req, res) => {
     return res.status(400).json({ error: 'start must be true or false: whether an agent starts on the card' });
   }
   const binderId = ws.binders.some((b) => b.id === req.body.binderId) ? req.body.binderId : null;
+  if (req.body.start && binderId && CLOSED_COLUMNS.includes(ws.binders.find((b) => b.id === binderId).title)) {   // the helper would never take it
+    return res.status(400).json({ error: 'an agent does not start on a card in a closed column: pick another' });
+  }
   const card = {
     id: randomUUID(),
     title,
