@@ -227,6 +227,32 @@ function namesIssue(words, path, iid, project) {
   return new RegExp(forms.join('|'), 'i').test(words);   // GitLab takes a path in any case
 }
 
+// The open issues GitLab links to a merge request that its own words name: its title and
+// description (words) and its commit messages.
+async function openIssuesNamedBy(source, run, onTime, project, iid, words) {
+  const ask = async (what) => {
+    const answer = parsed(await run(source.command, ['api', '--hostname', source.host,
+      `projects/${encodeURIComponent(project)}/merge_requests/${iid}/${what}`]), source.command);
+    return Array.isArray(answer) ? answer : [];
+  };
+  const messages = async () => {
+    const read = [];
+    for (let page = 1; page <= COMMIT_PAGES; page += 1) {
+      onTime();
+      const commits = await ask(`commits?per_page=100&page=${page}`);
+      read.push(...commits.map((commit) => textOf(commit?.message)));
+      if (commits.length < 100) break;
+    }
+    return read;
+  };
+  const [issues, commits] = await Promise.all([ask('related_issues?per_page=100'), messages()]);
+  const named = [words, ...commits].join('\n');
+  return issues.filter((issue) => {
+    const where = /^https?:\/\/[^/]+\/(.+?)\/-\/(?:issues|work_items)\/(\d+)$/.exec(textOf(issue?.web_url));
+    return issue?.state === 'opened' && where && namesIssue(named, where[1], where[2], project);
+  });
+}
+
 // The work of the user's open merge requests. An issue often has several (one per repository) and
 // a merge request may work on several issues, so each issue's ticket lists all of its merge
 // requests with their stage, draft or ready. A draft is work going on: the issues it works on are
@@ -261,28 +287,8 @@ async function addMergeRequestWork(source, tickets, graphql, run, onTime, proble
   const unanswered = [];   // {link, error}: told as one problem, not one each
   const worksOn = await eachAtOnce(open, async ({ project, iid, words, link }) => {
     onTime();
-    const ask = async (what) => {
-      const answer = parsed(await run(source.command, ['api', '--hostname', source.host,
-        `projects/${encodeURIComponent(project)}/merge_requests/${iid}/${what}`]), source.command);
-      return Array.isArray(answer) ? answer : [];
-    };
-    const messages = async () => {
-      const read = [];
-      for (let page = 1; page <= COMMIT_PAGES; page += 1) {
-        onTime();
-        const commits = await ask(`commits?per_page=100&page=${page}`);
-        read.push(...commits.map((commit) => textOf(commit?.message)));
-        if (commits.length < 100) break;
-      }
-      return read;
-    };
     try {
-      const [issues, commits] = await Promise.all([ask('related_issues?per_page=100'), messages()]);
-      const named = [words, ...commits].join('\n');
-      return issues.filter((issue) => {
-        const where = /^https?:\/\/[^/]+\/(.+?)\/-\/(?:issues|work_items)\/(\d+)$/.exec(textOf(issue?.web_url));
-        return issue?.state === 'opened' && where && namesIssue(named, where[1], where[2], project);
-      });
+      return await openIssuesNamedBy(source, run, onTime, project, iid, words);
     } catch (error) {
       if (error.outOfTime) throw error;   // the whole read's, not this merge request's
       unanswered.push({ link, error });
@@ -371,4 +377,36 @@ export function fetchTickets(source, run = runTool, { readTime = READ_TIME } = {
     if (Date.now() >= giveUpAt) throw Object.assign(new Error(`reading ${source.host} took longer than ${readTime / 1000} s`), { outOfTime: true });
   };
   return source.kind === 'gitlab' ? gitlabTickets(source, run, onTime) : githubTickets(source, run, onTime);
+}
+
+// Opens on GitLab the issue a merge request of the user's has none of, in the merge request's project:
+// titled as it, assigned to the user, and named in the merge request's description ("Refs #12"), so
+// GitLab links the two and the next refresh finds the merge request working on it. GitLab is asked
+// again first: only for the user's own open merge request that names no open issue yet. Answers
+// {reference, url, stage, assigned, linked}: linked is true, or why the description could not be changed.
+export async function createIssueForMergeRequest(source, reference, run = runTool) {
+  const where = /^([\w.-]+(?:\/[\w.-]+)+)!(\d+)$/.exec(reference);
+  if (source.kind !== 'gitlab' || !where) throw new Error(`no GitLab merge request to make an issue for: ${reference}`);
+  const [, project, iid] = where;
+  const base = `projects/${encodeURIComponent(project)}`;
+  const call = async (endpoint, method, body) => parsed(await run(source.command, ['api', '--hostname', source.host,
+    ...(method ? ['-X', method, '-H', 'Content-Type: application/json', '--input', '-'] : []), endpoint],
+  body === undefined ? undefined : JSON.stringify(body)), source.command);
+  const [me, mergeRequest] = await Promise.all([call('user'), call(`${base}/merge_requests/${iid}`)]);
+  if (mergeRequest?.state !== 'opened') throw new Error(`${reference} is not open any more`);
+  if (!me?.id || mergeRequest.author?.id !== me.id) throw new Error(`${reference} is not yours`);
+  const description = textOf(mergeRequest.description);
+  const named = await openIssuesNamedBy(source, run, () => {}, project, iid, `${textOf(mergeRequest.title)}\n${description}`);
+  if (named.length) throw new Error(`${reference} works on ${textOf(named[0].web_url)} already: the next refresh puts it there`);
+  const issue = await call(`${base}/issues`, 'POST',
+    { title: textOf(mergeRequest.title).replace(/^(draft|wip):\s*/i, ''), description: `Tracks !${iid}.`, assignee_ids: [me.id] });
+  if (!textOf(issue?.iid) || !textOf(issue.web_url)) throw new Error('GitLab answered without the new issue');
+  const made = { reference: `${project}#${issue.iid}`, url: textOf(issue.web_url), stage: mergeRequest.draft === true ? 'draft' : 'ready',
+    assigned: (issue.assignees || []).some((user) => user?.id === me.id) };
+  try {
+    await call(`${base}/merge_requests/${iid}`, 'PUT', { description: [description.trimEnd(), `Refs #${issue.iid}`].filter(Boolean).join('\n\n') });
+    return { ...made, linked: true };
+  } catch (error) {
+    return { ...made, linked: error.message };
+  }
 }

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fetchTickets, isLate, parseTicketConfig, runTool, SKIP_STATUSES } from '../tickets.js';
+import { createIssueForMergeRequest, fetchTickets, isLate, parseTicketConfig, runTool, SKIP_STATUSES } from '../tickets.js';
 import { call, newDataFolder, startBoard, stopBoard } from './helpers.js';
 
 const gitlab = parseTicketConfig(JSON.stringify({ sources: [{ kind: 'gitlab', host: 'gitlab.example.com' }] })).sources[0];
@@ -239,6 +239,59 @@ test('GitHub: every page of 100 is read, and the last short one ends it', async 
   };
   const { tickets } = await fetchTickets(github, run);
   assert.deepEqual([asked, tickets.length], [[1, 2], 101]);
+});
+
+// GitLab for making an issue: who the user is, the merge request, what it works on, and the writes.
+function fakeGitLabWrites({ mergeRequest, me = { id: 7 }, related = [], editFails = false }) {
+  const calls = [];
+  const run = async (command, args, input) => {
+    const method = args.includes('-X') ? args[args.indexOf('-X') + 1] : 'GET';
+    const endpoint = args[args.length - 1];
+    calls.push({ method, endpoint, body: input ? JSON.parse(input) : undefined });
+    if (endpoint === 'user') return JSON.stringify(me);
+    if (endpoint.includes('/related_issues')) return JSON.stringify(related);
+    if (endpoint.includes('/commits')) return '[]';
+    if (method === 'GET' && /\/merge_requests\/\d+$/.test(endpoint)) return JSON.stringify(mergeRequest);
+    if (method === 'POST' && endpoint.endsWith('/issues')) {
+      return JSON.stringify({ iid: 12, web_url: 'https://gitlab.example.com/acme/web/-/issues/12', assignees: [{ id: me.id }] });
+    }
+    if (method === 'PUT' && editFails) throw new Error('glab: 403 Forbidden');
+    if (method === 'PUT') return JSON.stringify({ ...mergeRequest, description: JSON.parse(input).description });
+    throw new Error(`unexpected ${method} ${endpoint}`);
+  };
+  return { run, calls };
+}
+const myDraft = { state: 'opened', draft: true, title: 'Draft: Speed up search', description: 'Caches the index.', author: { id: 7 } };
+
+test("GitLab: an issue is made for the user's draft in its project, assigned to them, and the draft names it", async () => {
+  const { run, calls } = fakeGitLabWrites({ mergeRequest: myDraft });
+  const made = await createIssueForMergeRequest(gitlab, 'acme/web!6', run);
+  assert.deepEqual(made, { reference: 'acme/web#12', url: 'https://gitlab.example.com/acme/web/-/issues/12', stage: 'draft', assigned: true, linked: true });
+  const writes = calls.filter((call) => call.method !== 'GET');
+  assert.deepEqual(writes, [
+    { method: 'POST', endpoint: 'projects/acme%2Fweb/issues', body: { title: 'Speed up search', description: 'Tracks !6.', assignee_ids: [7] } },
+    { method: 'PUT', endpoint: 'projects/acme%2Fweb/merge_requests/6', body: { description: 'Caches the index.\n\nRefs #12' } },
+  ], 'a JSON body: GitLab drops an assignee given any other way');
+});
+
+test("GitLab: no issue is made for a merge request not the user's, not open, or that works on an issue already", async () => {
+  const cases = [
+    [{ mergeRequest: { ...myDraft, author: { id: 99 } } }, /acme\/web!6 is not yours/],
+    [{ mergeRequest: { ...myDraft, state: 'merged' } }, /acme\/web!6 is not open any more/],
+    [{ mergeRequest: { ...myDraft, description: 'Refs #3' }, related: [relatedIssue('acme/web', 3, 'Search is slow')] }, /works on .*issues\/3 already/],
+  ];
+  for (const [given, why] of cases) {
+    const { run, calls } = fakeGitLabWrites(given);
+    await assert.rejects(createIssueForMergeRequest(gitlab, 'acme/web!6', run), why);
+    assert.ok(calls.every((call) => call.method === 'GET'), `${why}: nothing written`);
+  }
+  await assert.rejects(createIssueForMergeRequest(gitlab, 'acme/web#6', fakeGitLabWrites({ mergeRequest: myDraft }).run), /no GitLab merge request/);
+});
+
+test('GitLab: an issue made, but the draft not editable, says so rather than failing', async () => {
+  const { run } = fakeGitLabWrites({ mergeRequest: myDraft, editFails: true });
+  const made = await createIssueForMergeRequest(gitlab, 'acme/web!6', run);
+  assert.deepEqual([made.reference, made.linked], ['acme/web#12', 'glab: 403 Forbidden']);
 });
 
 test('tickets.json is checked, and each problem says what to write', () => {
