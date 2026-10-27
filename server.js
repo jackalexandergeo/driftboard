@@ -1121,8 +1121,10 @@ function restageMergeRequests(sourceName, mergeRequests, followed) {
 // Where a ticket's new card goes: the open column named as its status, if the board has one ("Awaits
 // review" for "Awaits Review", "In Progress" for "In progress"); else, for a ticket in a late stage that
 // a draft keeps on the board, an open column for that stage ("Reviewing"); else where new items land.
+// A column for finished work, whatever its case or wording ("Done", "closed", "Won't do", "Completed").
+const FINISHED = ['done', 'closed', 'cancel', "won't", 'wont', 'complet', 'resolved'];
 function landingFor(ws, ticket, skipStatuses) {
-  const open = ws.binders.filter((binder) => !CLOSED_COLUMNS.includes(binder.title));
+  const open = ws.binders.filter((binder) => !lateWords(binder.title, FINISHED).length);
   const status = ticket.status.trim().toLowerCase();
   const named = status && open.find((binder) => binder.title.trim().toLowerCase() === status);
   const stage = lateWords(ticket.status, skipStatuses);

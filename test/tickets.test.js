@@ -865,3 +865,19 @@ test("a new card lands in the column named as its ticket's status, else one for 
     await stopBoard(board);
   }
 });
+
+test('a new card never lands in a column for finished work, whatever its case or wording', async () => {
+  const board = await ticketBoard({
+    issues: [gitlabIssue(1, 'Fix login', { status: { name: 'Closed', category: 'done' } }), gitlabIssue(2, 'Fix export', { status: { name: 'Done', category: 'done' } })],
+    mergeRequests: [mergeRequest(5, 'Draft: Login and export', { description: 'Refs #1, #2' })],
+    related: { 'acme/web!5': [relatedIssue('acme/web', 1, 'Fix login'), relatedIssue('acme/web', 2, 'Fix export')] },
+  });
+  try {
+    const { activeWorkspaceId } = (await call(board, 'GET', '/api/state')).body;
+    for (const title of ['Closed', 'done']) await call(board, 'POST', `/api/workspaces/${activeWorkspaceId}/binders`, { title });
+    const { body } = await refresh(board);
+    assert.deepEqual(body.added.map((added) => added.column), ['To Do', 'To Do'], 'a draft keeps them on the board, not in a finished column');
+  } finally {
+    await stopBoard(board);
+  }
+});
