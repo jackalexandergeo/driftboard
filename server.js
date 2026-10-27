@@ -929,6 +929,29 @@ function itemProblems(item) {
   return problems;
 }
 
+// A new card for an item, at the end of binder's column (title, body, source, thread, link).
+function itemCard(ws, binder, item, { autoStarted = false } = {}) {
+  const card = {
+    id: randomUUID(),
+    title: item.title.trim(),
+    description: (item.body || '').trim(),
+    attachments: [],
+    binderId: binder ? binder.id : null,
+    order: binder ? ws.cards.filter((c) => c.binderId === binder.id).length : 0,
+    x: 80, y: 80,
+    source: { name: item.source, ...(item.thread ? { thread: item.thread } : {}) },
+    ...(autoStarted ? { pressed: { button: 'start', at: now() } } : {}),
+    createdAt: now(),
+    updatedAt: now(),
+  };
+  if (item.link) {
+    card.attachments.push({ id: randomUUID(), type: 'url', url: webURL(item.link.url), title: (item.link.title || '').trim(),
+      createdAt: now(), order: 0 });
+  }
+  ws.cards.push(card);
+  return card;
+}
+
 // The board an item names, made with the work columns if it is not there yet.
 function itemWorkspace(name) {
   let ws = state.workspaces.find((w) => w.name === name);
@@ -983,25 +1006,8 @@ app.post('/api/items', (req, res) => {
   // An item a source put further along (an answered question, a review) does not, and nothing
   // does while no helper watches the board (no mark): presses would pile up for a later helper.
   const autoStarted = !!ws.autoStart && !!ws.agents && binder === ws.binders[0] && !CLOSED_COLUMNS.includes(binder.title);
-  const card = {
-    id: randomUUID(),
-    title: item.title.trim(),
-    description: (item.body || '').trim(),
-    attachments: [],
-    binderId: binder ? binder.id : null,
-    order: binder ? ws.cards.filter((c) => c.binderId === binder.id).length : 0,
-    x: 80, y: 80,
-    source: { name: source, ...(item.thread ? { thread: item.thread } : {}) },
-    ...(autoStarted ? { pressed: { button: 'start', at: now() } } : {}),
-    createdAt: now(),
-    updatedAt: now(),
-  };
-  if (item.link) {
-    card.attachments.push({ id: randomUUID(), type: 'url', url: webURL(item.link.url), title: (item.link.title || '').trim(),
-      createdAt: now(), order: 0 });
-  }
+  const card = itemCard(ws, binder, item, { autoStarted });
   remember(card);
-  ws.cards.push(card);
   persist();
   res.status(201).json({ cardId: card.id, workspaceId: ws.id, created: true, ...(autoStarted ? { autoStarted: true } : {}) });
 });
