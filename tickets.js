@@ -203,8 +203,8 @@ async function gitlabTickets(source, run, onTime) {
     after = data.issues.pageInfo.endCursor;
   }
   onTime();
-  await addMergeRequestWork(source, tickets, graphql, run, onTime);
-  return tickets;
+  const mergeRequests = await addMergeRequestWork(source, tickets, graphql, run, onTime);
+  return { tickets, mergeRequests, problems: [] };
 }
 
 // The work of the user's open merge requests. An issue often has several (one per repository) and
@@ -270,6 +270,7 @@ async function addMergeRequestWork(source, tickets, graphql, run, onTime) {
     ticket.mergeRequests = links;
     ticket.active = ticket.active || drafted;
   }
+  return open.map(({ link }) => link);
 }
 
 // GitHub: the open issues assigned to the user in every repository they can see. Issues have
@@ -303,11 +304,13 @@ async function githubTickets(source, run, onTime) {
     if (issues.length < 100) break;
     onTime();
   }
-  return tickets;
+  return { tickets, mergeRequests: null, problems: [] };   // pull requests are not read
 }
 
-// [{id, kind, url, aliases, title, reference, status, category, mergeRequests: [{id, reference, url, title,
-// stage}], active}]: the open tickets assigned to the user, and on GitLab the work of their merge requests.
+// {tickets, mergeRequests, problems}. tickets: [{id, kind, url, aliases, title, reference, status, category,
+// mergeRequests: [link], active}], the open tickets assigned to the user and on GitLab the work of their
+// merge requests. mergeRequests: every open merge request of the user's, as a link {id, reference, url,
+// title, stage}, or null when they were not read. problems: what could not be read, the rest still was.
 export function fetchTickets(source, run = runTool, { readTime = READ_TIME } = {}) {
   const giveUpAt = Date.now() + readTime;
   const onTime = () => {

@@ -1094,7 +1094,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
   let changed = false;
   try {
     const read = await Promise.all(config.sources.map((source) => fetchTickets(source).then(
-      (tickets) => ({ source, tickets }), (error) => ({ source, problem: error.message }))));
+      (found) => ({ source, ...found }), (error) => ({ source, problem: error.message }))));
     const ws = getWorkspace(req.params.id);   // the user may have deleted it meanwhile
     if (!ws) return res.status(404).json({ error: 'workspace not found' });
     const linked = new Set();   // the addresses cards have, on any board
