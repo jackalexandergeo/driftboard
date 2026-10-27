@@ -216,7 +216,7 @@ async function request(method, url, body, isForm) {
     // The board just proved itself: an answer that is not JSON (a route an older server lacks,
     // a proxy's error page) is an error to show, not the board going away.
     if (answer === undefined) throw Object.assign(new Error(`the board answered HTTP ${res.status} without its usual reply`), { status: res.status });
-    if (!res.ok) throw Object.assign(new Error(answer?.error || 'request failed'), { status: res.status });
+    if (!res.ok) throw Object.assign(new Error(answer?.error || 'request failed'), { status: res.status, answer });
     return { data: answer, revision: Number(res.headers.get('X-Board-Revision')) || null };
   } finally {
     if (isWrite) endSave();
@@ -392,6 +392,7 @@ async function loadState() {
   if (!DEMO) uploadsKey = (await api('GET', '/api/session')).uploadsKey;
   const s = await api('GET', '/api/state');
   showNotice(s.notice);
+  showTicketsTool(s.tickets);
   wsList = s.workspaces; activeWorkspaceId = s.activeWorkspaceId;
   renderTabs();
   await loadWorkspace(activeWorkspaceId);
@@ -884,6 +885,40 @@ $('add-binder-btn').addEventListener('click', async () => {
     await reloadWorkspace();
     openBinderEditor(b.id, true); // new binder → jump straight to naming it
   } catch (e) { toast(e.message); }
+});
+
+// ---------- tickets ----------
+// ↻ Tickets shows once <data>/tickets.json names a tracker (see the README). It puts the user's
+// open tickets on this board where new items land, but not one in review or later, nor one
+// that has a card already (server.js).
+function showTicketsTool(offered) {
+  $('refresh-tickets-btn').classList.toggle('hidden', DEMO || !offered);
+}
+function ticketsSummary(answer) {
+  const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const landing = ws.binders[0]?.title;
+  return [
+    answer.added.length ? `${count(answer.added.length, 'new ticket', 'new tickets')}${landing ? ` in ${landing}` : ''}` : 'No new tickets',
+    answer.onBoard && `${answer.onBoard} on the board already`,
+    answer.late && `${answer.late} in review or later`,
+    answer.removed && `${count(answer.removed, 'card', 'cards')} you deleted`,
+  ].filter(Boolean).join(' · ');
+}
+$('refresh-tickets-btn').addEventListener('click', async () => {
+  const button = $('refresh-tickets-btn');
+  const label = button.querySelector('span');
+  button.disabled = true; label.textContent = 'Reading…';
+  try {
+    const answer = await api('POST', `/api/workspaces/${ws.id}/refresh-tickets`);
+    await reloadWorkspace();
+    toast(ticketsSummary(answer));
+    answer.problems.forEach((problem) => toast(`Not read: ${problem}`));
+  } catch (err) {
+    toast(err.message);
+    (err.answer?.problems || []).forEach((problem) => toast(problem));
+  } finally {
+    button.disabled = false; label.textContent = 'Tickets';
+  }
 });
 
 // ---------- agents ----------
@@ -1824,6 +1859,7 @@ async function checkForChanges() {
   try {
     const { data: s, revision } = await request('GET', '/api/state');
     showNotice(s.notice);
+    showTicketsTool(s.tickets);
     if (revision === knownRevision && !changedElsewhere) return;
     changedElsewhere = false;
     const boardGone = !s.workspaces.some((w) => w.id === activeWorkspaceId);

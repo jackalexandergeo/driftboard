@@ -287,6 +287,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .tool-btn:hover { background: rgba(231, 97, 37, 0.12); color: var(--orange); }
 .tool-btn.icon-only { font-size: 18px; padding: 6px 12px; color: var(--gray); }
 .tool-btn.active { background: rgba(231, 97, 37, 0.14); color: var(--orange); }
+.tool-btn:disabled { opacity: 0.6; cursor: progress; }
 .zoom-label { font-variant-numeric: tabular-nums; min-width: 52px; justify-content: center; color: var(--gray); }
 .tool-divider { width: 1px; align-self: stretch; background: var(--border); margin: 4px 3px; }
 /* a phone's width: the tools as icons (each keeps its title), so the agent tools fit too */
