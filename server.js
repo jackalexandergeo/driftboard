@@ -1023,7 +1023,8 @@ function offersTickets() {
   const config = loadTicketConfig(TICKETS_FILE);
   return config.sources.length > 0 || config.problems.length > 0;
 }
-// A tracker's text in a card's markdown stays text: no link, tag, picture or emphasis made of it.
+// A tracker's text in a card's markdown stays text: no tag, picture, emphasis or link under other
+// words made of it. A bare web address in it still shows as a link, to that address.
 const markdownText = (value) => value.replace(/\s+/g, ' ').replace(/[\\`*_[\]()<>!~|]/g, '\\$&');
 function linkKey(url) {
   try {
@@ -1041,6 +1042,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
   if (!config.sources.length) return res.status(400).json({ error: `no trackers to read: name them in ${TICKETS_FILE}` });
   if (readingTickets) return res.status(409).json({ error: 'the tickets are being read already' });
   readingTickets = true;
+  let changed = false;
   try {
     const read = await Promise.all(config.sources.map((source) => fetchTickets(source).then(
       (tickets) => ({ source, tickets }), (error) => ({ source, problem: error.message }))));
@@ -1057,7 +1059,6 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
     }
     const binder = ws.binders[0] || null;
     const answer = { added: [], onBoard: 0, removed: 0, late: 0, problems: [] };
-    let changed = false;
     for (const { source, tickets, problem } of read) {
       if (problem) {
         answer.problems.push(`${source.name}: ${problem}`);
@@ -1096,6 +1097,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
     res.json(answer);
   } catch (error) {   // Express 4 would not catch it: the board would stop
     console.error('reading tickets failed:', error);
+    if (changed) persist();   // the cards made before it are kept, as on the board already
     res.status(500).json({ error: `reading tickets failed: ${error.message}` });
   } finally {
     readingTickets = false;
