@@ -438,3 +438,71 @@ test("a card whose note or description gives the ticket's address is its card; a
     await stopBoard(board);
   }
 });
+
+// ---- An issue's merge requests on its card ----
+const linksOf = (card) => card.attachments.filter((attachment) => attachment.type === 'url').map((attachment) => attachment.title);
+async function cardOf(board, cardId) {
+  return (await call(board, 'GET', `/api/cards/${cardId}`)).body.card;
+}
+
+test("an issue's card lists its merge requests by stage, and its first line says how they stand", async () => {
+  const board = await ticketBoard({
+    issues: [gitlabIssue(1, 'Fix login', { status: TO_DO })],
+    mergeRequests: [mergeRequest(3, 'Draft: Fix login in the API', { project: 'acme/api' }), mergeRequest(4, 'Fix login form', { draft: false })],
+    related: { 'acme/api!3': [relatedIssue('acme/web', 1, 'Fix login')], 'acme/web!4': [relatedIssue('acme/web', 1, 'Fix login')] },
+  });
+  try {
+    const { body } = await refresh(board);
+    const card = await cardOf(board, body.added[0].cardId);
+    assert.equal(card.description, '**acme/web#1** · To do · 2 MRs: 1 draft, 1 ready');
+    assert.deepEqual(linksOf(card), ['acme/web#1', 'api!3 · draft', 'web!4 · ready']);
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test("a later press brings a card's merge requests up to date, and leaves a first line the user wrote", async () => {
+  const work = (mergeRequests) => ({
+    issues: [gitlabIssue(1, 'Fix login', { status: TO_DO })],
+    mergeRequests,
+    related: Object.fromEntries(mergeRequests.map((found) => [found.reference, [relatedIssue('acme/web', 1, 'Fix login')]])),
+  });
+  const board = await ticketBoard(work([mergeRequest(3, 'Draft: Login API'), mergeRequest(4, 'Draft: Login form')]));
+  try {
+    const cardId = (await refresh(board)).body.added[0].cardId;
+    fs.writeFileSync(board.issuesFile, JSON.stringify(work([mergeRequest(3, 'Login API', { draft: false }), mergeRequest(5, 'Draft: Login tests')])));
+    const second = (await refresh(board)).body;
+    assert.deepEqual([second.added, second.updated, second.onBoard], [[], 1, 1]);
+    let card = await cardOf(board, cardId);
+    assert.deepEqual(linksOf(card), ['acme/web#1', 'web!3 · ready', 'web!4 · merged or closed', 'web!5 · draft'],
+      'one gone from the open ones is marked, not taken off');
+    assert.equal(card.description, '**acme/web#1** · To do · 2 MRs: 1 draft, 1 ready');
+    await call(board, 'PATCH', `/api/cards/${cardId}`, { description: 'Waiting on the API review first.' });
+    fs.writeFileSync(board.issuesFile, JSON.stringify(work([mergeRequest(3, 'Login API', { draft: false }), mergeRequest(5, 'Login tests', { draft: false })])));
+    await refresh(board);
+    card = await cardOf(board, cardId);
+    assert.equal(card.description, 'Waiting on the API review first.');
+    assert.deepEqual(linksOf(card).slice(-1), ['web!5 · ready']);
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test("a draft's own card becomes its ticket's card once the ticket is there, not a second card", async () => {
+  const draft = mergeRequest(6, 'Draft: Tidy the toolbar');
+  const board = await ticketBoard({ issues: [], mergeRequests: [draft], related: {} });
+  try {
+    const first = (await refresh(board)).body;
+    const cardId = first.added[0].cardId;
+    assert.equal((await cardOf(board, cardId)).description, '**acme/web!6** · Draft MR, no ticket yet');
+    fs.writeFileSync(board.issuesFile, JSON.stringify({ issues: [], mergeRequests: [draft], related: { 'acme/web!6': [relatedIssue('acme/web', 10, 'Toolbar is cluttered')] } }));
+    const second = (await refresh(board)).body;
+    assert.deepEqual([second.added, second.updated], [[], 1]);
+    const card = await cardOf(board, cardId);
+    assert.equal(card.description, '**acme/web#10** · 1 MR: 1 draft');
+    assert.deepEqual(linksOf(card), ['web!6 · draft', 'acme/web#10']);
+    assert.deepEqual((await refresh(board)).body.added, [], 'and the ticket is remembered as that card');
+  } finally {
+    await stopBoard(board);
+  }
+});

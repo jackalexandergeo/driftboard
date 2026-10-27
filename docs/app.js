@@ -915,6 +915,7 @@ function ticketsSummary(answer) {
   const landing = ws.binders[0]?.title;
   return [
     answer.added.length ? `${count(answer.added.length, 'new ticket', 'new tickets')}${landing ? ` in ${landing}` : ''}` : 'No new tickets',
+    answer.updated && `${count(answer.updated, 'card', 'cards')} brought up to date`,
     answer.onBoard && `${answer.onBoard} on the board already`,
     answer.late && `${answer.late} in review or later`,
     answer.removed && `${count(answer.removed, 'card', 'cards')} you deleted`,

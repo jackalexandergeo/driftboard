@@ -1026,8 +1026,54 @@ function offersTickets() {
   return config.sources.length > 0 || config.problems.length > 0;
 }
 // A tracker's text in a card's markdown stays text: no tag, picture, emphasis or link under other
-// words made of it. A bare web address in it still shows as a link, to that address.
-const markdownText = (value) => value.replace(/\s+/g, ' ').replace(/[\\`*_[\]()<>!~|]/g, '\\$&');
+// words made of it. A bare web address in it still shows as a link, to that address. A ! is left
+// as it is (a merge request's acme/web!6): it makes a picture only before a [, which is escaped.
+const markdownText = (value) => value.replace(/\s+/g, ' ').replace(/[\\`*_[\]()<>~|]/g, '\\$&');
+// The first line of the card made for a ticket: its reference, its status, and how its merge
+// requests stand ("**acme/web#5** · In progress · 3 MRs: 2 draft, 1 ready").
+function ticketSummary(ticket) {
+  const total = ticket.mergeRequests.length;
+  const drafts = ticket.mergeRequests.filter((link) => link.stage === 'draft').length;
+  const stand = total ? `${total} MR${total === 1 ? '' : 's'}: ${[drafts && `${drafts} draft`, total - drafts && `${total - drafts} ready`].filter(Boolean).join(', ')}` : '';
+  return [`**${markdownText(ticket.reference)}**`, markdownText(ticket.status), stand].filter(Boolean).join(' · ');
+}
+// A merge request's link on a card says which and how it stands: "web!6 · draft".
+const mergeRequestTitle = (link) => `${link.reference.split('/').pop()} · ${link.stage}`;
+const NO_LONGER_OPEN = 'merged or closed';
+// The card's links to the ticket's merge requests, as they stand now: new ones added, stages brought
+// up to date, and ones no longer open marked so, not taken off (they are the work's history). The
+// first line the refresh wrote follows, unless the user has written over it. Answers whether it changed.
+function syncMergeRequests(card, ticket) {
+  let changed = false;
+  const open = new Map(ticket.mergeRequests.filter((link) => webURL(link.url)).map((link) => [linkKey(link.url), link]));
+  for (const attachment of card.attachments) {
+    if (attachment.type !== 'url') continue;
+    const key = linkKey(attachment.url);
+    const link = open.get(key);
+    const title = link ? mergeRequestTitle(link)
+      : attachment.mergeRequest && `${String(attachment.title || '').split(' · ')[0]} · ${NO_LONGER_OPEN}`;
+    if (title && attachment.title !== title) {
+      Object.assign(attachment, { title, mergeRequest: true });
+      changed = true;
+    }
+    open.delete(key);
+  }
+  for (const link of open.values()) {
+    card.attachments.push({ id: randomUUID(), type: 'url', url: webURL(link.url), title: mergeRequestTitle(link), mergeRequest: true,
+      createdAt: now(), order: card.attachments.length });
+    changed = true;
+  }
+  const summary = ticketSummary(ticket);
+  const ours = card.source?.summary !== undefined ? card.description === card.source.summary
+    : !card.description.includes('\n') && card.description.startsWith(`**${markdownText(ticket.reference)}**`);   // made before the board kept it
+  if (ours && card.source) {
+    if (card.description !== summary) changed = true;
+    card.description = summary;
+    card.source.summary = summary;
+  }
+  if (changed) card.updatedAt = now();
+  return changed;
+}
 const WEB_ADDRESS = /https?:\/\/[^\s<>()[\]"'`]+/g;
 function linkKey(url) {
   try {
@@ -1068,7 +1114,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
       }
     }
     const binder = ws.binders[0] || null;
-    const answer = { added: [], onBoard: 0, removed: 0, late: 0, problems: [] };
+    const answer = { added: [], updated: 0, onBoard: 0, removed: 0, late: 0, problems: [] };
     for (const { source, tickets, problem } of read) {
       if (problem) {
         answer.problems.push(`${source.name}: ${problem}`);
@@ -1082,8 +1128,16 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
         }
         const seen = seenItem(memory, ticket.id);
         if (seen) {
-          if (seen[1] && getCard(seen[1])) answer.onBoard += 1;
-          else answer.removed += 1;
+          const held = seen[1] && getCard(seen[1]);
+          if (!held) {
+            answer.removed += 1;
+            continue;
+          }
+          answer.onBoard += 1;
+          if (syncMergeRequests(held.card, ticket)) {
+            answer.updated += 1;
+            changed = true;
+          }
           continue;
         }
         // Not remembered: that card is about something else too, and once it goes the ticket is due one.
@@ -1091,12 +1145,27 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
           answer.onBoard += 1;
           continue;
         }
+        // A draft's own card, made before its issue had a ticket, becomes that ticket's card.
+        const adopted = ticket.mergeRequests.map((link) => seenItem(memory, link.id)?.[1]).map((cardId) => cardId && getCard(cardId)).find(Boolean);
+        if (adopted) {
+          rememberItem(memory, ticket.id, adopted.card.id);
+          if (webURL(ticket.url)) {
+            adopted.card.attachments.push({ id: randomUUID(), type: 'url', url: webURL(ticket.url), title: ticket.reference,
+              createdAt: now(), order: adopted.card.attachments.length });
+          }
+          syncMergeRequests(adopted.card, ticket);
+          answer.updated += 1;
+          changed = true;
+          continue;
+        }
         const made = itemCard(ws, binder, {
           title: ticket.title.trim().slice(0, ITEM_LIMITS.title) || ticket.reference,
-          body: [`**${markdownText(ticket.reference)}**`, markdownText(ticket.status)].filter(Boolean).join(' · '),
+          body: ticketSummary(ticket),
           source: source.name,
           link: webURL(ticket.url) ? { url: ticket.url, title: ticket.reference } : null,
         });
+        made.source.summary = made.description;
+        syncMergeRequests(made, ticket);
         rememberItem(memory, ticket.id, made.id);
         if (webURL(ticket.url)) linked.add(linkKey(ticket.url));
         answer.added.push({ cardId: made.id, title: made.title });
