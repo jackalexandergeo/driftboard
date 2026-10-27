@@ -115,6 +115,9 @@ export function runTool(command, args, input) {
       const said = String(stderr || error.message).trim().split('\n').filter(Boolean).slice(-2).join(' ');
       reject(new Error(said.slice(0, 300) || `${command} failed`));
     });
+    // A tool may exit before it reads its input (a wrong flag, no login): the pipe then breaks, which
+    // would stop the board unheard. Its exit says what went wrong; the broken pipe adds nothing.
+    tool.stdin.on('error', () => {});
     tool.stdin.end(input ?? '');
   });
 }

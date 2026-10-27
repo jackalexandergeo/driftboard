@@ -195,6 +195,12 @@ test('a tool gets its input on stdin, and none when there is none', async () => 
   assert.equal(await runTool(process.execPath, echo), '[]', 'and a tool that reads stdin is not left waiting');
 });
 
+test('a tool that exits without reading its input fails as itself, and the board goes on', async () => {
+  const quits = ['-e', 'setTimeout(() => process.exit(3), 50)'];
+  await assert.rejects(runTool(process.execPath, quits, 'x'.repeat(200 * 1024)));
+  assert.equal(await runTool(process.execPath, ['-e', '']), '', 'nor does closing no input to a tool already gone');
+});
+
 test('a tool that answers too much says so, not that it was slow', async () => {
   await assert.rejects(runTool(process.execPath, ['-e', "process.stdout.write('x'.repeat(34 * 1024 * 1024))"]),
     /answered more than 32 MB/);
