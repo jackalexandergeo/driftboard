@@ -348,13 +348,13 @@ async function githubTickets(source, run, onTime) {
     if (issues.length < 100) break;
     onTime();
   }
-  return { tickets, mergeRequests: null, problems: [] };   // pull requests are not read
+  return { tickets, mergeRequests: [], problems: [] };   // pull requests are not read: none to know of
 }
 
 // {tickets, mergeRequests, problems}. tickets: [{id, kind, url, aliases, title, reference, status, category,
 // mergeRequests: [link], active}], the open tickets assigned to the user and on GitLab the work of their
 // merge requests. mergeRequests: every open merge request of the user's, as a link {id, reference, url,
-// title, stage}, or null when they were not read. problems: what could not be read, the rest still was.
+// title, stage}, or null when they could not be read. problems: what could not be read, the rest still was.
 export function fetchTickets(source, run = runTool, { readTime = READ_TIME } = {}) {
   const giveUpAt = Date.now() + readTime;
   const onTime = () => {

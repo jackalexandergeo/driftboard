@@ -624,3 +624,22 @@ test("a card from before the board kept its first line takes the new one only if
     await stopBoard(board);
   }
 });
+
+test("a press that cannot read the merge requests leaves the cards' first line as it was", async () => {
+  const work = (mergeRequests, related) => ({ issues: [gitlabIssue(1, 'Fix login', { status: TO_DO })], mergeRequests, related });
+  const draft = mergeRequest(3, 'Draft: Login API', { description: 'Refs acme/web#1' });
+  const board = await ticketBoard(work([draft], { 'acme/web!3': [relatedIssue('acme/web', 1, 'Fix login')] }));
+  try {
+    const cardId = (await refresh(board)).body.added[0].cardId;
+    for (const [what, broken] of [['one lookup', work([draft], { 'acme/web!3': 'fails' })], ['the list', work('fails', {})]]) {
+      fs.writeFileSync(board.issuesFile, JSON.stringify(broken));
+      const { body } = await refresh(board);
+      assert.equal(body.problems.length, 1, what);
+      assert.equal(body.updated, 0, `${what}: nothing to bring up to date from a read that failed`);
+      const card = await cardOf(board, cardId);
+      assert.deepEqual([card.description, linksOf(card)], ['**acme/web#1** · To do · 1 MR: 1 draft', ['acme/web#1', 'web!3 · draft']], what);
+    }
+  } finally {
+    await stopBoard(board);
+  }
+});
