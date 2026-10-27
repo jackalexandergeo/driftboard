@@ -1023,6 +1023,8 @@ function offersTickets() {
   const config = loadTicketConfig(TICKETS_FILE);
   return config.sources.length > 0 || config.problems.length > 0;
 }
+// A tracker's text in a card's markdown stays text: no link, tag, picture or emphasis made of it.
+const markdownText = (value) => value.replace(/\s+/g, ' ').replace(/[\\`*_[\]()<>!~|]/g, '\\$&');
 function linkKey(url) {
   try {
     const address = new URL(url);
@@ -1080,7 +1082,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
         }
         const made = itemCard(ws, binder, {
           title: ticket.title.trim().slice(0, ITEM_LIMITS.title) || ticket.reference,
-          body: [`**${ticket.reference}**`, ticket.status].filter(Boolean).join(' · '),
+          body: [`**${markdownText(ticket.reference)}**`, markdownText(ticket.status)].filter(Boolean).join(' · '),
           source: source.name,
           link: webURL(ticket.url) ? { url: ticket.url, title: ticket.reference } : null,
         });

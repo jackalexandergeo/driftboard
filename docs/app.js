@@ -319,9 +319,12 @@ function withoutRemoteMedia(html) {
   return template.innerHTML;
 }
 // The text of a description for a card's face. Only markdown's own marks go: a hyphen, a # or
-// an underscore inside a word (follow-up, acme/web-app#12, snake_case) is text.
+// an underscore inside a word (follow-up, acme/web-app#12, snake_case) is text, and so is a
+// mark escaped with a backslash (set aside first, put back as itself last).
 function stripMd(s) {
+  const escaped = [];
   return String(s || '')
+    .replace(/\\([\\`*_{}[\]()#+\-.!<>|~])/g, (_, mark) => `\uE000${escaped.push(mark) - 1}\uE000`)
     .replace(/!\[.*?\]\(.*?\)/g, '')                       // images
     .replace(/\[(.*?)\]\(.*?\)/g, '$1')                     // links -> text
     .replace(/^ {0,3}([-*_] *){3,}$/gm, ' ')                // rules
@@ -329,6 +332,7 @@ function stripMd(s) {
     .replace(/(\*\*|__|~~)(.+?)\1/g, '$2')                  // bold, strikethrough
     .replace(/(^|\W)[*_](\S(?:.*?\S)?)[*_](?=\W|$)/g, '$1$2') // italics
     .replace(/`+/g, '')                                     // code
+    .replace(/\uE000(\d+)\uE000/g, (_, index) => escaped[index])
     .replace(/\s+/g, ' ')
     .trim();
 }

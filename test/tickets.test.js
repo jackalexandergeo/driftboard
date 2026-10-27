@@ -321,3 +321,14 @@ test("an item that takes a ticket's source and id is the item's card, and the ti
     await stopBoard(board);
   }
 });
+
+test("a ticket's reference and status are text on its card, not markdown a label could make a link of", async () => {
+  const board = await ticketBoard([gitlabIssue(1, 'One', { status: null, labels: ['Status::[Click me](https://evil.example) <b>now</b>'] })]);
+  try {
+    const { body } = await refresh(board);
+    const card = (await call(board, 'GET', `/api/cards/${body.added[0].cardId}`)).body.card;
+    assert.equal(card.description, '**acme/web#1** · \\[Click me\\]\\(https://evil.example\\) \\<b\\>now\\</b\\>');
+  } finally {
+    await stopBoard(board);
+  }
+});
