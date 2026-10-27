@@ -88,8 +88,14 @@ export function loadTicketConfig(file) {
 export function isLate(ticket, skipStatuses = SKIP_STATUSES) {
   if (ticket.active) return false;
   if (['done', 'canceled'].includes(ticket.category)) return true;
-  const words = (ticket.status || '').toLowerCase().replace(/’/g, "'").split(/[\s_/-]+/).filter(Boolean);
-  return words.some((word) => skipStatuses.some((skip) => word.startsWith(skip)));
+  return lateWords(ticket.status, skipStatuses).length > 0;
+}
+
+// The late stages a text names ("Awaits Review": review): of a ticket's status, or of a board's
+// column, the one a ticket in that stage goes to.
+export function lateWords(text, skipStatuses = SKIP_STATUSES) {
+  const words = (text || '').toLowerCase().replace(/’/g, "'").split(/[\s_/-]+/).filter(Boolean);
+  return skipStatuses.filter((skip) => words.some((word) => word.startsWith(skip)));
 }
 
 // A tracker's answer is read as it comes: a field that is not text is empty, never an error.

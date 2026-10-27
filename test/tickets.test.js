@@ -394,7 +394,7 @@ test('a board without tickets.json offers no ↻ Tickets, and a refresh says whe
   }
 });
 
-test('the tickets still the user\'s become cards where new items land, the late ones do not, and no agent starts', async () => {
+test('the tickets still the user\'s become cards, the late ones do not, and no agent starts', async () => {
   const board = await ticketBoard([
     gitlabIssue(1, 'Fix login', { status: { name: 'In progress', category: 'in_progress' } }),
     gitlabIssue(2, 'Add export', { status: { name: 'Awaits Review', category: 'in_progress' } }),
@@ -412,8 +412,9 @@ test('the tickets still the user\'s become cards where new items land, the late 
     assert.deepEqual([body.late, body.onBoard, body.removed, body.problems], [1, 0, 0, []]);
     const ws = (await call(board, 'GET', `/api/workspaces/${id}`)).body;
     const made = ws.cards.filter((card) => card.source?.name === 'gitlab');
-    assert.deepEqual(made.map((card) => [card.binderId, card.pressed]), [[ws.binders[0].id, undefined], [ws.binders[0].id, undefined]],
-      'in the first column, with nothing pressed: Autostart is for new items, not for work the user has already');
+    const columnOf = (card) => ws.binders.find((binder) => binder.id === card.binderId).title;
+    assert.deepEqual(made.map((card) => [columnOf(card), card.pressed]), [['In Progress', undefined], [ws.binders[0].title, undefined]],
+      'in the column named as its status, or where items land, with nothing pressed: Autostart is for new items, not work the user has already');
     assert.equal(made[0].description, '**acme/web#1** · In progress');
     assert.deepEqual(made[0].attachments.map((attachment) => [attachment.type, attachment.url, attachment.title]),
       [['url', 'https://gitlab.example.com/acme/web/-/issues/1', 'acme/web#1']]);
@@ -815,6 +816,31 @@ test("Create GitLab issue writes only to the GitLab the card's merge request is 
     assert.equal(status, 400);
     assert.match(body.error, /gitlab\.example\.com/);
     assert.deepEqual(board.writes(), [], 'nothing written to the other GitLab');
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test("a new card lands in the column named as its ticket's status, else one for its stage, else where items land", async () => {
+  const board = await ticketBoard({
+    issues: [gitlabIssue(1, 'Fix login', { status: TO_DO }), gitlabIssue(2, 'Fix export', { status: { name: 'In progress', category: 'in_progress' } }),
+      gitlabIssue(3, 'Fix search', { status: { name: 'Awaits Review', category: 'in_progress' } }),
+      gitlabIssue(4, 'Fix import', { status: { name: 'Ready for QA', category: 'in_progress' } })],
+    mergeRequests: [mergeRequest(5, 'Draft: Search', { description: 'Refs #3' }), mergeRequest(6, 'Draft: Import', { description: 'Refs #4' }),
+      mergeRequest(7, 'Draft: Tidy the toolbar')],
+    related: { 'acme/web!5': [relatedIssue('acme/web', 3, 'Fix search')], 'acme/web!6': [relatedIssue('acme/web', 4, 'Fix import')] },
+  });
+  try {
+    const { activeWorkspaceId } = (await call(board, 'GET', '/api/state')).body;
+    await call(board, 'POST', `/api/workspaces/${activeWorkspaceId}/binders`, { title: 'Awaits review' });
+    const { body } = await refresh(board);
+    const placed = Object.fromEntries(body.added.map((added) => [added.title, added.column]));
+    assert.deepEqual(placed, {
+      'Fix login': 'To Do', 'Fix export': 'In Progress', 'Fix search': 'Awaits review', 'Fix import': 'To Do', 'Tidy the toolbar': 'To Do',
+    }, 'named as the status first ("Awaits review" over "Reviewing"); QA has no column here; a draft with no ticket where items land');
+    const ws = (await call(board, 'GET', `/api/workspaces/${activeWorkspaceId}`)).body;
+    const column = (title) => ws.binders.find((binder) => binder.id === ws.cards.find((card) => card.title === title).binderId).title;
+    assert.equal(column('Fix search'), 'Awaits review');
   } finally {
     await stopBoard(board);
   }

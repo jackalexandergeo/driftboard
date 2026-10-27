@@ -956,9 +956,12 @@ $('create-ticket-btn').addEventListener('click', async (event) => {
 });
 function ticketsSummary(answer) {
   const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-  const landing = ws.binders[0]?.title;
+  const columns = {};   // column → new cards there, in the order they came
+  answer.added.forEach((added) => { if (added.column) columns[added.column] = (columns[added.column] || 0) + 1; });
+  const where = Object.entries(columns);
+  const placed = where.length === 1 ? ` in ${where[0][0]}` : where.length ? `: ${where.map(([column, n]) => `${n} in ${column}`).join(', ')}` : '';
   return [
-    answer.added.length ? `${count(answer.added.length, 'new ticket', 'new tickets')}${landing ? ` in ${landing}` : ''}` : 'No new tickets',
+    answer.added.length ? `${count(answer.added.length, 'new ticket', 'new tickets')}${placed}` : 'No new tickets',
     answer.updated && `${count(answer.updated, 'card', 'cards')} brought up to date`,
     answer.onBoard && `${answer.onBoard} on the board already`,
     answer.late && `${answer.late} in review or later`,

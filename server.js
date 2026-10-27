@@ -7,7 +7,7 @@ import fsp from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { attachTerminals } from './terminal.js';
-import { createIssueForMergeRequest, fetchTickets, isLate, loadTicketConfig } from './tickets.js';
+import { createIssueForMergeRequest, fetchTickets, isLate, lateWords, loadTicketConfig } from './tickets.js';
 import { DATA_DIR, HELPER_SOCKET, HOST, ITEMS_KEY_FILE, LEGACY_DATA_DIR, OPENING_DIR, PIN_FILE, PORT, SIGN_IN, TOKEN_FILE, TOKEN_FORMAT_FILE,
   isLoopback, localURL } from './settings.js';
 
@@ -1118,6 +1118,16 @@ function restageMergeRequests(sourceName, mergeRequests, followed) {
   }
   return changed;
 }
+// Where a ticket's new card goes: the open column named as its status, if the board has one ("Awaits
+// review" for "Awaits Review", "In Progress" for "In progress"); else, for a ticket in a late stage that
+// a draft keeps on the board, an open column for that stage ("Reviewing"); else where new items land.
+function landingFor(ws, ticket, skipStatuses) {
+  const open = ws.binders.filter((binder) => !CLOSED_COLUMNS.includes(binder.title));
+  const status = ticket.status.trim().toLowerCase();
+  const named = status && open.find((binder) => binder.title.trim().toLowerCase() === status);
+  const stage = lateWords(ticket.status, skipStatuses);
+  return named || (stage.length && open.find((binder) => lateWords(binder.title, stage).length)) || ws.binders[0] || null;
+}
 const WEB_ADDRESS = /https?:\/\/[^\s<>()[\]"'`]+/g;
 function linkKey(url) {
   try {
@@ -1157,7 +1167,6 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
         }
       }
     }
-    const binder = ws.binders[0] || null;
     const answer = { added: [], updated: 0, onBoard: 0, removed: 0, late: 0, problems: [] };
     const updated = new Set();   // the cards brought up to date, each once
     const followed = new Set();  // the cards a ticket in the list followed
@@ -1209,7 +1218,8 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
           updated.add(adopted.card.id);
           continue;
         }
-        const made = itemCard(ws, binder, {
+        const landing = landingFor(ws, ticket, config.skipStatuses);
+        const made = itemCard(ws, landing, {
           title: ticket.title.trim().slice(0, ITEM_LIMITS.title) || ticket.reference,
           body: ticketSummary(ticket),
           source: source.name,
@@ -1221,7 +1231,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
         followed.add(made.id);
         rememberItem(memory, ticket.id, made.id);
         if (webURL(ticket.url)) linked.add(linkKey(ticket.url));
-        answer.added.push({ cardId: made.id, title: made.title });
+        answer.added.push({ cardId: made.id, title: made.title, column: landing ? landing.title : null });
         changed = true;
       }
       if (mergeRequests) for (const card of restageMergeRequests(source.name, mergeRequests, followed)) updated.add(card.id);
