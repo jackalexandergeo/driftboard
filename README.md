@@ -284,6 +284,54 @@ It answers `201` with `{cardId, workspaceId, created: true}` for a new card (wit
 are. A card keeps the newest 200 notes that items and agents added (yours are all kept).
 With sign-in off, no key is needed.
 
+## 🎫 Bring in your tickets
+
+**↻ Tickets** in the toolbar puts your open tickets from GitLab or GitHub on the board you
+are looking at, where new items land. Each ticket still yours gets a card with its title,
+its reference and status, and a link to it. A ticket gets no card when:
+
+- it is past your part: its status has a word starting with `review`, `verif`, `qa`, `test`,
+  `done`, `deploy`, `merg`, `releas`, `closed`, `cancel` or `won't` ("Awaits Review", "Ready for
+  QA", "Deployed"). Backlog, to do, in progress and blocked all get one.
+- it has a card already: one ↻ Tickets made (if you deleted it, it stays gone), or any card on
+  any board that links the ticket.
+
+Press it whenever you like; it only adds what is new, and says what it did ("3 new tickets in
+To Do · 11 on the board already · 5 in review or later"). It never starts an agent, Autostart
+or not. The button shows once `<data>/tickets.json` names your trackers:
+
+```json
+{
+  "sources": [
+    { "kind": "gitlab", "host": "gitlab.example.com" },
+    { "kind": "github" }
+  ]
+}
+```
+
+| Field | |
+|---|---|
+| `kind` | `gitlab` or `github` |
+| `host` | the tracker's address (default `gitlab.com`, `github.com`) |
+| `name` | the cards' source (default the kind): two trackers of one kind need one each |
+| `command` | the tool to run (default `glab`, `gh`): give its full path when the board's service does not find it |
+| `statusLabels` | where a ticket has no status of its own, a label starting with one of these is its status (default `Status::`, `status:`, `status/`) |
+| `skipStatuses` | next to `sources`: your own list of the words above |
+
+The board reads your tickets through the tracker's own tool and the login you already have there
+(`glab auth login`, `gh auth login`), so it keeps no tracker token, and it runs only what this
+file says: nothing on the board can change it. Edits count at the next press.
+
+- **GitLab**: the open issues assigned to you. Their status is the issue's own (GitLab 18 and
+  later, Premium); where an instance has none, a `Status::` label. GitLab files a status like
+  "Awaits Review" under *in progress*, so the name decides, not the category.
+- **GitHub**: the open issues assigned to you in every repository you can see (pull requests
+  left out). GitHub issues have no status of their own, so a label like `status: in review` is it.
+
+A script can press it too: `POST /api/workspaces/<id>/refresh-tickets` with the board's token
+answers `{added: [{cardId, title}], onBoard, removed, late, problems}`; a tracker that could not
+be read is named in `problems` and the others still come in. The items key cannot.
+
 ## 🤖 Put an AI agent on a card
 
 `helper/` starts **Claude Code** or **Codex** on a card when you press ▶ Start, and the card
