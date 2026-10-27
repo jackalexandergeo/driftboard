@@ -28,6 +28,7 @@ if (failing) {
 const mine = (project, iid) => (Array.isArray(mergeRequests) ? mergeRequests : []).find((each) => each.reference === `${project}!${iid}`);
 let answer;
 if (endpoint === 'user') answer = { id: 7, username: 'pat' };
+else if (method === 'GET' && /^projects\/.+\/issues\?/.test(endpoint)) answer = [];
 else if (rest) answer = rest[3] === 'commits' ? [] : related[`${decodeURIComponent(rest[1])}!${rest[2]}`] ?? [];
 else if (mergeRequest) {
   const found = mine(decodeURIComponent(mergeRequest[1]), mergeRequest[2]);

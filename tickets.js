@@ -401,8 +401,12 @@ export async function createIssueForMergeRequest(source, reference, run = runToo
   const description = textOf(mergeRequest.description);
   const named = await openIssuesNamedBy(source, run, () => {}, project, iid, `${textOf(mergeRequest.title)}\n${description}`);
   if (named.length) throw new Error(`${reference} works on ${textOf(named[0].web_url)} already: the next refresh puts it there`);
-  const issue = await call(`${base}/issues`, 'POST',
-    { title: textOf(mergeRequest.title).replace(/^(draft|wip):\s*/i, ''), description: `Tracks !${iid}.`, assignee_ids: [me.id] });
+  // One a press made before, cut off before it could name it in the merge request (the board stopped):
+  // that one is named now, not a second made.
+  const tracks = `Tracks !${iid}.`;
+  const earlier = await call(`${base}/issues?state=opened&author_id=${me.id}&in=description&search=${encodeURIComponent(tracks)}&per_page=20`);
+  const issue = (Array.isArray(earlier) ? earlier : []).find((each) => textOf(each?.description).trim() === tracks)
+    ?? await call(`${base}/issues`, 'POST', { title: textOf(mergeRequest.title).replace(/^(draft|wip):\s*/i, ''), description: tracks, assignee_ids: [me.id] });
   if (!textOf(issue?.iid) || !textOf(issue.web_url)) throw new Error('GitLab answered without the new issue');
   const made = { reference: `${project}#${issue.iid}`, url: textOf(issue.web_url), stage: mergeRequest.draft === true ? 'draft' : 'ready',
     assigned: (issue.assignees || []).some((user) => user?.id === me.id) };

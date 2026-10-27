@@ -248,7 +248,7 @@ test('GitHub: every page of 100 is read, and the last short one ends it', async 
 });
 
 // GitLab for making an issue: who the user is, the merge request, what it works on, and the writes.
-function fakeGitLabWrites({ mergeRequest, me = { id: 7 }, related = [], editFails = false, editedMeanwhile }) {
+function fakeGitLabWrites({ mergeRequest, me = { id: 7 }, related = [], editFails = false, editedMeanwhile, earlier = [] }) {
   const calls = [];
   let reads = 0;
   const run = async (command, args, input) => {
@@ -258,6 +258,7 @@ function fakeGitLabWrites({ mergeRequest, me = { id: 7 }, related = [], editFail
     if (endpoint === 'user') return JSON.stringify(me);
     if (endpoint.includes('/related_issues')) return JSON.stringify(related);
     if (endpoint.includes('/commits')) return '[]';
+    if (method === 'GET' && endpoint.includes('/issues?')) return JSON.stringify(earlier);
     if (method === 'GET' && /\/merge_requests\/\d+$/.test(endpoint)) {
       reads += 1;
       return JSON.stringify(reads > 1 && editedMeanwhile !== undefined ? { ...mergeRequest, description: editedMeanwhile } : mergeRequest);
@@ -296,6 +297,17 @@ test("GitLab: no issue is made for a merge request not the user's, not open, or 
     assert.ok(calls.every((call) => call.method === 'GET'), `${why}: nothing written`);
   }
   await assert.rejects(createIssueForMergeRequest(gitlab, 'acme/web#6', fakeGitLabWrites({ mergeRequest: myDraft }).run), /no GitLab merge request/);
+});
+
+test("GitLab: an issue a cut-off press made already for the draft is named, not made again", async () => {
+  const earlier = [{ iid: 11, web_url: 'https://gitlab.example.com/acme/web/-/issues/11', description: 'Tracks !6.', assignees: [{ id: 7 }] },
+    { iid: 10, web_url: 'https://gitlab.example.com/acme/web/-/issues/10', description: 'Tracks !6. And more', assignees: [] }];
+  const { run, calls } = fakeGitLabWrites({ mergeRequest: myDraft, earlier });
+  const made = await createIssueForMergeRequest(gitlab, 'acme/web!6', run);
+  assert.deepEqual([made.reference, made.assigned, made.linked], ['acme/web#11', true, true]);
+  assert.ok(!calls.some((call) => call.method === 'POST'), 'no second issue');
+  assert.deepEqual(calls.find((call) => call.method === 'PUT').body, { description: 'Caches the index.\n\nRefs #11' });
+  assert.ok(calls.some((call) => call.endpoint.includes('/issues?') && call.endpoint.includes('author_id=7')), 'only the user\'s own are looked at');
 });
 
 test("GitLab: an edit made to the draft's description while the issue was made is kept", async () => {
