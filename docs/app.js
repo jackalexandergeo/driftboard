@@ -331,14 +331,14 @@ function stripMd(s) {
     .replace(/!\[[^\]\n]*\]\([^)\n]*\)/g, '')                               // images
     .replace(/\[([^\]\n]*)\]\([^)\n]*\)/g, '$1')                             // links -> text
     .replace(/^ {0,3}([-*_] *){3,}$/gm, ' ')                                 // rules
-    .replace(/^[ \t|:-]*-{3}[ \t|:-]*$/gm, ' ')                              // a table's rule
+    .replace(/^(?=[^\n]*---)[ \t|:-]+$/gm, ' ')                              // a table's rule
     .replace(/^([ \t]*#{1,6}[ \t][^\n]*?)[ \t]+#+[ \t]*$/gm, '$1')           // a heading's closing #s
     .replace(/^(?:[ \t]*(?:>|#{1,6}(?=[ \t])|[-*+](?=[ \t])))+[ \t]*/gm, '')  // heading, quote and list marks
     .replace(/(\*\*|~~)([^\n]{1,200}?)\1/g, '$2')                           // bold, strikethrough
     .replace(/(^|\W)__([^\n]{1,200}?)__(?=\W|$)/g, '$1$2')                  // bold with _, not inside a word
     .replace(/(^|\W)[*_]([^\s*_](?:[^*_\n]{0,200}?[^\s*_])?)[*_](?=\W|$)/g, '$1$2') // italics
     .replace(/`+/g, '')                                                      // code
-    .replace(/(\d+)/g, (_, index) => escaped[index])
+    .replace(/(\d+)/g, (marked, index) => escaped[index] ?? marked)
     .replace(/\s+/g, ' ')
     .trim();
 }
