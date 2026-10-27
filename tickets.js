@@ -15,6 +15,7 @@ const SOURCE_NAME = /^[a-z0-9][a-z0-9._-]*$/;   // as an item's source
 const HOST_NAME = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d+)?$/i;
 const PAGES = 20;          // at most this many pages of 100 tickets from one tracker
 const AT_ONCE = 6;         // calls to a tracker at the same time
+const COMMIT_PAGES = 5;    // a merge request's commits read for the issues they name: 500 at most
 const TOOL_TIMEOUT = 60_000;
 const ANSWER_LIMIT = 32 * 1024 * 1024;
 // One tracker's whole read, its pages together: well inside the time a browser's request lasts.
@@ -151,7 +152,7 @@ const GITLAB_MERGE_REQUESTS = `query($after: String) {
   currentUser {
     authoredMergeRequests(state: opened, first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
-      nodes { iid title draft webUrl reference(full: true) project { fullPath } }
+      nodes { iid title description draft webUrl reference(full: true) project { fullPath } }
     }
   }
 }`;
@@ -214,13 +215,26 @@ async function gitlabTickets(source, run, onTime) {
   return { tickets, mergeRequests, problems };
 }
 
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Whether a merge request's own words name an issue: its reference (acme/web#5, or web#5), its
+// address, or #5 in the merge request's own project.
+function namesIssue(words, path, iid, project) {
+  const forms = [`(?<![\\w.-])(?:${escapeRegExp(path)}|${escapeRegExp(path.split('/').pop())})#${iid}(?!\\d)`,
+    `${escapeRegExp(path)}/-/(?:issues|work_items)/${iid}(?!\\d)`];
+  if (path === project) forms.push(`(?<![\\w/#!&-])#${iid}(?!\\d)`);
+  return new RegExp(forms.join('|')).test(words);
+}
+
 // The work of the user's open merge requests. An issue often has several (one per repository) and
 // a merge request may work on several issues, so each issue's ticket lists all of its merge
 // requests with their stage, draft or ready. A draft is work going on: the issues it works on are
 // the user's work now, assigned to them or not, whatever their status. One ready for review brings
 // in no work by itself (it is in review, late like an issue awaiting review); it is listed on the
 // ticket its issue has anyway. A draft that works on no open issue is work of its own, with no
-// ticket yet. One whose issues cannot be looked up is named in problems and left out of both.
+// ticket yet. Its issues are the ones GitLab links to it that its title, description or commit
+// messages name: GitLab also links an issue a reviewer only mentions in a comment ("conflicts with
+// #45"), which is not this work. One whose issues cannot be looked up is named in problems and left
+// out of both.
 async function addMergeRequestWork(source, tickets, graphql, run, onTime, problems) {
   const open = [];
   let after = null;
@@ -233,7 +247,7 @@ async function addMergeRequestWork(source, tickets, graphql, run, onTime, proble
       const iid = textOf(mergeRequest?.iid);
       if (!reference || !project || !iid) continue;
       open.push({
-        project, iid,
+        project, iid, words: `${textOf(mergeRequest.title)}\n${textOf(mergeRequest.description)}`,
         link: { id: `${source.host}/${reference}`, reference, url: textOf(mergeRequest.webUrl),
           title: textOf(mergeRequest.title).replace(/^(draft|wip):\s*/i, ''), stage: mergeRequest.draft === true ? 'draft' : 'ready' },
       });
@@ -242,12 +256,29 @@ async function addMergeRequestWork(source, tickets, graphql, run, onTime, proble
     onTime();
     after = found.pageInfo.endCursor;
   }
-  const worksOn = await eachAtOnce(open, async ({ project, iid, link }) => {
+  const worksOn = await eachAtOnce(open, async ({ project, iid, words, link }) => {
     onTime();
-    const endpoint = `projects/${encodeURIComponent(project)}/merge_requests/${iid}/related_issues`;
+    const ask = async (what) => {
+      const answer = parsed(await run(source.command, ['api', '--hostname', source.host,
+        `projects/${encodeURIComponent(project)}/merge_requests/${iid}/${what}`]), source.command);
+      return Array.isArray(answer) ? answer : [];
+    };
+    const messages = async () => {
+      const read = [];
+      for (let page = 1; page <= COMMIT_PAGES; page += 1) {
+        const commits = await ask(`commits?per_page=100&page=${page}`);
+        read.push(...commits.map((commit) => textOf(commit?.message)));
+        if (commits.length < 100) break;
+      }
+      return read;
+    };
     try {
-      const issues = parsed(await run(source.command, ['api', '--hostname', source.host, endpoint]), source.command);
-      return Array.isArray(issues) ? issues.filter((issue) => issue?.state === 'opened') : [];
+      const [issues, commits] = await Promise.all([ask('related_issues?per_page=100'), messages()]);
+      const named = [words, ...commits].join('\n');
+      return issues.filter((issue) => {
+        const where = /^https?:\/\/[^/]+\/(.+?)\/-\/(?:issues|work_items)\/(\d+)$/.exec(textOf(issue?.web_url));
+        return issue?.state === 'opened' && where && namesIssue(named, where[1], where[2], project);
+      });
     } catch (error) {
       problems.push(`${link.reference}: ${error.message}`);
       return null;

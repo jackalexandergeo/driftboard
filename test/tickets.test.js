@@ -21,8 +21,8 @@ function gitlabIssue(number, title, { status, labels = [], form = 'issues' } = {
   };
 }
 
-function mergeRequest(iid, title, { draft = true, project = 'acme/web' } = {}) {
-  return { iid: String(iid), title, draft, webUrl: `https://gitlab.example.com/${project}/-/merge_requests/${iid}`,
+function mergeRequest(iid, title, { draft = true, project = 'acme/web', description = '' } = {}) {
+  return { iid: String(iid), title, draft, description, webUrl: `https://gitlab.example.com/${project}/-/merge_requests/${iid}`,
     reference: `${project}!${iid}`, project: { fullPath: project } };
 }
 
@@ -32,7 +32,7 @@ function relatedIssue(project, iid, title, { state = 'opened', form = 'issues' }
 
 // glab, answering GraphQL (who the user is, pages of their issues, their merge requests) and the
 // REST list of the issues each merge request works on, from related: {"<project>!<iid>": [issue]}.
-function fakeGlab(pages, { statusField = true, mergeRequests = [], related = {} } = {}) {
+function fakeGlab(pages, { statusField = true, mergeRequests = [], related = {}, commits = {} } = {}) {
   const calls = [];
   const run = async (command, args) => {
     calls.push([command, ...args]);
@@ -40,6 +40,11 @@ function fakeGlab(pages, { statusField = true, mergeRequests = [], related = {} 
     const issues = rest && related[`${decodeURIComponent(rest[1])}!${rest[2]}`];
     if (issues === 'fails') throw new Error('glab: 404 Not Found');
     if (rest) return JSON.stringify(issues ?? []);
+    const commitsOf = /^projects\/(.+)\/merge_requests\/(\d+)\/commits\?per_page=100&page=(\d+)$/.exec(args[3]);
+    if (commitsOf) {
+      const all = commits[`${decodeURIComponent(commitsOf[1])}!${commitsOf[2]}`] ?? [];
+      return JSON.stringify(all.slice((commitsOf[3] - 1) * 100, commitsOf[3] * 100).map((message) => ({ message })));
+    }
     const query = args[args.indexOf('-f') + 1];
     if (query.includes('authoredMergeRequests')) {
       return JSON.stringify({ data: { currentUser: { authoredMergeRequests: { pageInfo: { hasNextPage: false }, nodes: mergeRequests } } } });
@@ -92,7 +97,7 @@ test('GitLab: every page is read, and an issue is known by both its addresses', 
 
 test("GitLab: a draft MR brings in the open issues it works on, the user's or not, and they are not late", async () => {
   const { run } = fakeGlab([[gitlabIssue(1, 'Fix login', { status: { name: 'Awaits Review', category: 'in_progress' } })]], {
-    mergeRequests: [mergeRequest(3, 'Draft: Fix login for real')],
+    mergeRequests: [mergeRequest(3, 'Draft: Fix login for real', { description: 'Refs acme/web#1, other/app#9 and acme/web#2' })],
     related: { 'acme/web!3': [relatedIssue('acme/web', 1, 'Fix login'), relatedIssue('other/app', 9, 'Login API', { form: 'work_items' }),
       relatedIssue('acme/web', 2, 'Old login bug', { state: 'closed' })] },
   });
@@ -106,7 +111,7 @@ test("GitLab: a draft MR brings in the open issues it works on, the user's or no
 
 test("GitLab: a ready MR is listed on its issue's ticket but brings in no work, and a draft with no open issue is work of its own", async () => {
   const { run } = fakeGlab([[gitlabIssue(8, 'Search is slow', { status: TO_DO })]], {
-    mergeRequests: [mergeRequest(4, 'Draft: Tidy the toolbar'), mergeRequest(5, 'Speed up search', { draft: false }),
+    mergeRequests: [mergeRequest(4, 'Draft: Tidy the toolbar'), mergeRequest(5, 'Speed up search', { draft: false, description: 'Refs #8, #7' }),
       mergeRequest(6, 'Bump a dependency', { draft: false })],
     related: { 'acme/web!5': [relatedIssue('acme/web', 8, 'Search is slow'), relatedIssue('acme/web', 7, 'Search ranks badly')] },
   });
@@ -118,9 +123,21 @@ test("GitLab: a ready MR is listed on its issue's ticket but brings in no work, 
   ], 'acme/web#7 is not the user\'s and only in review; a ready MR on no issue is review, not work');
 });
 
+test("GitLab: an MR's work is the issues its title, description or commits name, not one a comment mentions", async () => {
+  const { run } = fakeGlab([[]], {
+    mergeRequests: [mergeRequest(3, 'Draft: Fix login', { description: 'Part of #1. See https://gitlab.example.com/other/app/-/issues/9' })],
+    related: { 'acme/web!3': [relatedIssue('acme/web', 1, 'Fix login'), relatedIssue('other/app', 9, 'Login API'),
+      relatedIssue('other/app', 12, 'Session rework'), relatedIssue('acme/web', 45, 'Conflicting change')] },
+    commits: { 'acme/web!3': [...Array(100).fill('chore: tidy'), 'fix(login): keep the session\n\nRefs other/app#12'] },
+  });
+  const { tickets } = await fetchTickets(gitlab, run);
+  assert.deepEqual(tickets.map((ticket) => ticket.reference), ['acme/web#1', 'other/app#9', 'other/app#12'],
+    'other/app#12 is named on the second page of commits; acme/web#45 is only in a reviewer\'s comment ("conflicts with #45")');
+});
+
 test("GitLab: a merge request that cannot be looked into is named, and the rest of the read stands", async () => {
   const { run } = fakeGlab([[gitlabIssue(1, 'Fix login', { status: TO_DO })]], {
-    mergeRequests: [mergeRequest(3, 'Draft: Login API'), mergeRequest(4, 'Draft: Login form')],
+    mergeRequests: [mergeRequest(3, 'Draft: Login API'), mergeRequest(4, 'Draft: Login form', { description: 'Refs acme/web#1' })],
     related: { 'acme/web!3': 'fails', 'acme/web!4': [relatedIssue('acme/web', 1, 'Fix login')] },
   });
   const { tickets, mergeRequests, problems } = await fetchTickets(gitlab, run);
@@ -469,7 +486,8 @@ async function cardOf(board, cardId) {
 test("an issue's card lists its merge requests by stage, and its first line says how they stand", async () => {
   const board = await ticketBoard({
     issues: [gitlabIssue(1, 'Fix login', { status: TO_DO })],
-    mergeRequests: [mergeRequest(3, 'Draft: Fix login in the API', { project: 'acme/api' }), mergeRequest(4, 'Fix login form', { draft: false })],
+    mergeRequests: [mergeRequest(3, 'Draft: Fix login in the API', { project: 'acme/api', description: 'Refs acme/web#1' }),
+      mergeRequest(4, 'Fix login form', { draft: false, description: 'Closes #1' })],
     related: { 'acme/api!3': [relatedIssue('acme/web', 1, 'Fix login')], 'acme/web!4': [relatedIssue('acme/web', 1, 'Fix login')] },
   });
   try {
@@ -485,7 +503,7 @@ test("an issue's card lists its merge requests by stage, and its first line says
 test("a later press brings a card's merge requests up to date, and leaves a first line the user wrote", async () => {
   const work = (mergeRequests) => ({
     issues: [gitlabIssue(1, 'Fix login', { status: TO_DO })],
-    mergeRequests,
+    mergeRequests: mergeRequests.map((found) => ({ ...found, description: 'Refs acme/web#1' })),
     related: Object.fromEntries(mergeRequests.map((found) => [found.reference, [relatedIssue('acme/web', 1, 'Fix login')]])),
   });
   const board = await ticketBoard(work([mergeRequest(3, 'Draft: Login API'), mergeRequest(4, 'Draft: Login form')]));
@@ -516,7 +534,8 @@ test("a draft's own card becomes its ticket's card once the ticket is there, not
     const first = (await refresh(board)).body;
     const cardId = first.added[0].cardId;
     assert.equal((await cardOf(board, cardId)).description, '**acme/web!6** · Draft MR, no ticket yet');
-    fs.writeFileSync(board.issuesFile, JSON.stringify({ issues: [], mergeRequests: [draft], related: { 'acme/web!6': [relatedIssue('acme/web', 10, 'Toolbar is cluttered')] } }));
+    fs.writeFileSync(board.issuesFile, JSON.stringify({ issues: [], mergeRequests: [{ ...draft, description: 'Refs acme/web#10' }],
+      related: { 'acme/web!6': [relatedIssue('acme/web', 10, 'Toolbar is cluttered')] } }));
     const second = (await refresh(board)).body;
     assert.deepEqual([second.added, second.updated], [[], 1]);
     const card = await cardOf(board, cardId);

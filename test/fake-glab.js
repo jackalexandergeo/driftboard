@@ -7,10 +7,10 @@ import { setTimeout as sleep } from 'node:timers/promises';
 await sleep(Number(process.env.FAKE_GLAB_DELAY) || 0);
 const given = JSON.parse(fs.readFileSync(process.env.FAKE_GLAB_ISSUES, 'utf8'));
 const { issues = [], mergeRequests = [], related = {} } = Array.isArray(given) ? { issues: given } : given;
-const rest = /^projects\/(.+)\/merge_requests\/(\d+)\/related_issues$/.exec(process.argv[5] || '');
+const rest = /^projects\/(.+)\/merge_requests\/(\d+)\/(related_issues|commits)/.exec(process.argv[5] || '');
 const query = process.argv[process.argv.indexOf('-f') + 1] || '';
 const page = (nodes) => ({ pageInfo: { hasNextPage: false, endCursor: null }, nodes });
-const answer = rest ? related[`${decodeURIComponent(rest[1])}!${rest[2]}`] ?? []
+const answer = rest ? (rest[3] === 'commits' ? [] : related[`${decodeURIComponent(rest[1])}!${rest[2]}`] ?? [])
   : query.includes('authoredMergeRequests') ? { data: { currentUser: { authoredMergeRequests: page(mergeRequests) } } }
     : query.includes('currentUser') ? { data: { currentUser: { username: 'pat' } } }
       : { data: { issues: page(issues) } };
