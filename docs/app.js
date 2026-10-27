@@ -928,6 +928,8 @@ function showTicketActions(card) {
   button.disabled = false; button.textContent = 'Create GitLab issue';
   button.title = `Makes an issue in ${project}, titled as the merge request and assigned to you, and adds "Refs #…" to its description`;
 }
+// Enter held down on the button repeats it: a repeat is never an answer.
+$('create-ticket-btn').addEventListener('keydown', (event) => { if (event.repeat) event.preventDefault(); });
 $('create-ticket-btn').addEventListener('click', async (event) => {
   const card = currentCard();
   const button = $('create-ticket-btn');
