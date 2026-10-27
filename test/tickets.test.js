@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fetchTickets, isLate, parseTicketConfig, SKIP_STATUSES } from '../tickets.js';
+import { fetchTickets, isLate, parseTicketConfig, runTool, SKIP_STATUSES } from '../tickets.js';
 import { call, newDataFolder, startBoard, stopBoard } from './helpers.js';
 
 const gitlab = parseTicketConfig(JSON.stringify({ sources: [{ kind: 'gitlab', host: 'gitlab.example.com' }] })).sources[0];
@@ -83,6 +83,16 @@ test('GitLab without issue statuses: the labels say it', async () => {
 test('GitLab: a tool that is not signed in says so', async () => {
   const run = async () => JSON.stringify({ data: { currentUser: null } });
   await assert.rejects(fetchTickets(gitlab, run), /not signed in to gitlab\.example\.com/);
+});
+
+test('a tool that answers too much says so, not that it was slow', async () => {
+  await assert.rejects(runTool(process.execPath, ['-e', "process.stdout.write('x'.repeat(34 * 1024 * 1024))"]),
+    /answered more than 32 MB/);
+});
+
+test('a tracker that takes too long over its pages is given up, saying so', async () => {
+  const { run } = fakeGlab([[gitlabIssue(1, 'One')], [gitlabIssue(2, 'Two')]]);
+  await assert.rejects(fetchTickets(gitlab, run, { readTime: 0 }), /reading gitlab\.example\.com took longer than 0 s/);
 });
 
 test('GitHub: assigned issues, without the pull requests the same list carries', async () => {

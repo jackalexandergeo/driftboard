@@ -14,6 +14,9 @@ const SOURCE_NAME = /^[a-z0-9][a-z0-9._-]*$/;   // as an item's source
 const HOST_NAME = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d+)?$/i;
 const PAGES = 20;          // at most this many pages of 100 tickets from one tracker
 const TOOL_TIMEOUT = 60_000;
+const ANSWER_LIMIT = 32 * 1024 * 1024;
+// One tracker's whole read, its pages together: well inside the time a browser's request lasts.
+const READ_TIME = 120_000;
 
 // tickets.json, checked: {sources: [{kind, name, host, command, statusLabels}], skipStatuses, problems}.
 export function parseTicketConfig(text) {
@@ -99,9 +102,10 @@ function labelStatus(labels, statusLabels) {
 // Runs a tracker's tool, without a shell. A failure says what the tool said, in short.
 export function runTool(command, args) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { timeout: TOOL_TIMEOUT, maxBuffer: 32 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(command, args, { timeout: TOOL_TIMEOUT, maxBuffer: ANSWER_LIMIT }, (error, stdout, stderr) => {
       if (!error) return resolve(stdout);
       if (error.code === 'ENOENT') return reject(new Error(`${command} is not installed, or not on the board's PATH: give its full path as "command"`));
+      if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return reject(new Error(`${command} answered more than ${ANSWER_LIMIT / 1024 / 1024} MB`));
       if (error.killed) return reject(new Error(`${command} took longer than ${TOOL_TIMEOUT / 1000} s`));
       const said = String(stderr || error.message).trim().split('\n').filter(Boolean).slice(-2).join(' ');
       reject(new Error(said.slice(0, 300) || `${command} failed`));
@@ -126,7 +130,7 @@ const GITLAB_ISSUES = (withStatus) => `query($username: String!, $after: String)
   }
 }`;
 
-async function gitlabTickets(source, run) {
+async function gitlabTickets(source, run, onTime) {
   const graphql = async (query, variables = {}) => {
     const args = ['api', '--hostname', source.host, 'graphql', '-f', `query=${query}`];
     for (const [key, value] of Object.entries(variables)) args.push('-f', `${key}=${value}`);
@@ -168,6 +172,7 @@ async function gitlabTickets(source, run) {
       });
     }
     if (!data.issues.pageInfo.hasNextPage) break;
+    onTime();
     after = data.issues.pageInfo.endCursor;
   }
   return tickets;
@@ -175,7 +180,7 @@ async function gitlabTickets(source, run) {
 
 // GitHub: the open issues assigned to the user in every repository they can see. Issues have
 // no status of their own there: a status label is it.
-async function githubTickets(source, run) {
+async function githubTickets(source, run, onTime) {
   const tickets = [];
   for (let page = 1; page <= PAGES; page += 1) {
     const path = `/issues?filter=assigned&state=open&per_page=100&page=${page}`;
@@ -199,11 +204,16 @@ async function githubTickets(source, run) {
       });
     }
     if (issues.length < 100) break;
+    onTime();
   }
   return tickets;
 }
 
 // [{id, url, aliases, title, reference, status, category}]: the open tickets assigned to the user.
-export function fetchTickets(source, run = runTool) {
-  return source.kind === 'gitlab' ? gitlabTickets(source, run) : githubTickets(source, run);
+export function fetchTickets(source, run = runTool, { readTime = READ_TIME } = {}) {
+  const giveUpAt = Date.now() + readTime;
+  const onTime = () => {
+    if (Date.now() >= giveUpAt) throw new Error(`reading ${source.host} took longer than ${readTime / 1000} s`);
+  };
+  return source.kind === 'gitlab' ? gitlabTickets(source, run, onTime) : githubTickets(source, run, onTime);
 }
