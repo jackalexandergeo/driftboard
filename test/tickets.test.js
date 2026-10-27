@@ -591,3 +591,36 @@ test("a draft's own card is adopted by one ticket only, when the draft works on 
     await stopBoard(board);
   }
 });
+
+test("a card from before the board kept its first line takes the new one only if the line is still the refresh's", async () => {
+  const issues = [gitlabIssue(1, 'Fix login', { status: TO_DO }), gitlabIssue(2, 'Fix export', { status: TO_DO })];
+  let board = await ticketBoard({ issues, mergeRequests: [], related: {} });
+  const { data, issuesFile } = board;
+  try {
+    const made = (await refresh(board)).body.added;
+    const boardFile = path.join(data, 'board.json');
+    const written = () => fs.existsSync(boardFile) && made.every(({ cardId }) => fs.readFileSync(boardFile, 'utf8').includes(cardId));
+    for (let attempt = 0; attempt < 50 && !written(); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 100));
+    const exited = new Promise((resolve) => board.server.once('exit', resolve));
+    board.server.kill();
+    await exited;
+    const saved = JSON.parse(fs.readFileSync(boardFile, 'utf8'));
+    for (const card of saved.workspaces.flatMap((w) => w.cards)) {   // as the first version left them
+      delete card.source.summary;
+      delete card.source.ticket;
+      if (card.title === 'Fix export') card.description = '**acme/web#2** · blocked on the API';
+    }
+    fs.writeFileSync(boardFile, JSON.stringify(saved));
+    fs.writeFileSync(issuesFile, JSON.stringify({ issues,
+      mergeRequests: [mergeRequest(3, 'Draft: Login and export', { description: 'Refs #1, #2' })],
+      related: { 'acme/web!3': [relatedIssue('acme/web', 1, 'Fix login'), relatedIssue('acme/web', 2, 'Fix export')] } }));
+    board = await startBoard(false, { data, env: { FAKE_GLAB_ISSUES: issuesFile } });
+    await refresh(board);
+    const [login, exported] = await Promise.all(made.map(({ cardId }) => cardOf(board, cardId)));
+    assert.equal(login.description, '**acme/web#1** · To do · 1 MR: 1 draft');
+    assert.equal(exported.description, '**acme/web#2** · blocked on the API', 'the user wrote over it: it stays');
+    assert.deepEqual(linksOf(exported), ['acme/web#2', 'web!3 · draft'], "its links are the refresh's all the same");
+  } finally {
+    await stopBoard(board);
+  }
+});

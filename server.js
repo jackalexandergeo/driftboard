@@ -1062,8 +1062,10 @@ function syncMergeRequests(card, ticket) {
     changed = true;
   }
   const summary = ticketSummary(ticket);
+  // A card made before the board kept its first line: still the refresh's only while it is exactly
+  // what the refresh wrote then, the ticket's reference and status.
   const ours = card.source?.summary !== undefined ? card.description === card.source.summary
-    : !card.description.includes('\n') && card.description.startsWith(`**${markdownText(ticket.reference)}**`);   // made before the board kept it
+    : card.description === [`**${markdownText(ticket.reference)}**`, markdownText(ticket.status)].filter(Boolean).join(' · ');
   if (ours && card.source) {
     if (card.description !== summary) changed = true;
     card.description = summary;
