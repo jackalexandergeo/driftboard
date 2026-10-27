@@ -36,8 +36,10 @@ function fakeGlab(pages, { statusField = true, mergeRequests = [], related = {} 
   const calls = [];
   const run = async (command, args) => {
     calls.push([command, ...args]);
-    const rest = /^projects\/(.+)\/merge_requests\/(\d+)\/related_issues$/.exec(args[3]);
-    if (rest) return JSON.stringify(related[`${decodeURIComponent(rest[1])}!${rest[2]}`] ?? []);
+    const rest = /^projects\/(.+)\/merge_requests\/(\d+)\/related_issues/.exec(args[3]);
+    const issues = rest && related[`${decodeURIComponent(rest[1])}!${rest[2]}`];
+    if (issues === 'fails') throw new Error('glab: 404 Not Found');
+    if (rest) return JSON.stringify(issues ?? []);
     const query = args[args.indexOf('-f') + 1];
     if (query.includes('authoredMergeRequests')) {
       return JSON.stringify({ data: { currentUser: { authoredMergeRequests: { pageInfo: { hasNextPage: false }, nodes: mergeRequests } } } });
@@ -114,6 +116,25 @@ test("GitLab: a ready MR is listed on its issue's ticket but brings in no work, 
     ['gitlab.example.com/acme/web#8', 'issue', 'Search is slow', 'To do', false, ['acme/web!5 · ready']],
     ['gitlab.example.com/acme/web!4', 'mergeRequest', 'Tidy the toolbar', 'Draft MR, no ticket yet', false, []],
   ], 'acme/web#7 is not the user\'s and only in review; a ready MR on no issue is review, not work');
+});
+
+test("GitLab: a merge request that cannot be looked into is named, and the rest of the read stands", async () => {
+  const { run } = fakeGlab([[gitlabIssue(1, 'Fix login', { status: TO_DO })]], {
+    mergeRequests: [mergeRequest(3, 'Draft: Login API'), mergeRequest(4, 'Draft: Login form')],
+    related: { 'acme/web!3': 'fails', 'acme/web!4': [relatedIssue('acme/web', 1, 'Fix login')] },
+  });
+  const { tickets, mergeRequests, problems } = await fetchTickets(gitlab, run);
+  assert.deepEqual(tickets.map((ticket) => [ticket.reference, ticket.mergeRequests.map((link) => link.reference)]), [['acme/web#1', ['acme/web!4']]],
+    'not a card of its own: it works on something, it is only not known what');
+  assert.deepEqual(mergeRequests.map((link) => link.reference), ['acme/web!3', 'acme/web!4'], 'still open, all the same');
+  assert.deepEqual(problems, ['acme/web!3: glab: 404 Not Found']);
+});
+
+test('GitLab: out of time before the merge requests, the issues read stand and the merge requests are named', async () => {
+  const { run } = fakeGlab([[gitlabIssue(1, 'Fix login', { status: TO_DO })]], { mergeRequests: [mergeRequest(3, 'Draft: Login API')] });
+  const { tickets, mergeRequests, problems } = await fetchTickets(gitlab, run, { readTime: 0 });
+  assert.deepEqual([tickets.map((ticket) => ticket.reference), mergeRequests], [['acme/web#1'], null]);
+  assert.deepEqual(problems, ['merge requests not read: reading gitlab.example.com took longer than 0 s']);
 });
 
 test('GitLab without issue statuses: the labels say it', async () => {

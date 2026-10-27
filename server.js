@@ -1115,11 +1115,12 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
     }
     const binder = ws.binders[0] || null;
     const answer = { added: [], updated: 0, onBoard: 0, removed: 0, late: 0, problems: [] };
-    for (const { source, tickets, problem } of read) {
+    for (const { source, tickets, problems = [], problem } of read) {
       if (problem) {
         answer.problems.push(`${source.name}: ${problem}`);
         continue;
       }
+      answer.problems.push(...problems.map((part) => `${source.name}: ${part}`));
       const memory = `ticket:${source.name}`;   // apart from items: no item's source has a colon
       for (const ticket of tickets) {
         if (isLate(ticket, config.skipStatuses)) {

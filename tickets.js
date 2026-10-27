@@ -202,9 +202,16 @@ async function gitlabTickets(source, run, onTime) {
     onTime();
     after = data.issues.pageInfo.endCursor;
   }
-  onTime();
-  const mergeRequests = await addMergeRequestWork(source, tickets, graphql, run, onTime);
-  return { tickets, mergeRequests, problems: [] };
+  // The issues are read: past here a failure costs the merge requests' part only.
+  const problems = [];
+  let mergeRequests = null;
+  try {
+    onTime();
+    mergeRequests = await addMergeRequestWork(source, tickets, graphql, run, onTime, problems);
+  } catch (error) {
+    problems.push(`merge requests not read: ${error.message}`);
+  }
+  return { tickets, mergeRequests, problems };
 }
 
 // The work of the user's open merge requests. An issue often has several (one per repository) and
@@ -213,8 +220,8 @@ async function gitlabTickets(source, run, onTime) {
 // the user's work now, assigned to them or not, whatever their status. One ready for review brings
 // in no work by itself (it is in review, late like an issue awaiting review); it is listed on the
 // ticket its issue has anyway. A draft that works on no open issue is work of its own, with no
-// ticket yet.
-async function addMergeRequestWork(source, tickets, graphql, run, onTime) {
+// ticket yet. One whose issues cannot be looked up is named in problems and left out of both.
+async function addMergeRequestWork(source, tickets, graphql, run, onTime, problems) {
   const open = [];
   let after = null;
   for (let page = 0; page < PAGES; page += 1) {
@@ -235,14 +242,20 @@ async function addMergeRequestWork(source, tickets, graphql, run, onTime) {
     onTime();
     after = found.pageInfo.endCursor;
   }
-  const worksOn = await eachAtOnce(open, async ({ project, iid }) => {
+  const worksOn = await eachAtOnce(open, async ({ project, iid, link }) => {
     onTime();
     const endpoint = `projects/${encodeURIComponent(project)}/merge_requests/${iid}/related_issues`;
-    const issues = parsed(await run(source.command, ['api', '--hostname', source.host, endpoint]), source.command);
-    return Array.isArray(issues) ? issues.filter((issue) => issue?.state === 'opened') : [];
+    try {
+      const issues = parsed(await run(source.command, ['api', '--hostname', source.host, endpoint]), source.command);
+      return Array.isArray(issues) ? issues.filter((issue) => issue?.state === 'opened') : [];
+    } catch (error) {
+      problems.push(`${link.reference}: ${error.message}`);
+      return null;
+    }
   });
   const issues = new Map();   // id → {issue, reference, links}: every open issue an open merge request works on
   open.forEach(({ link }, index) => {
+    if (!worksOn[index]) return;   // not known what it works on
     let working = 0;
     for (const issue of worksOn[index]) {
       const where = /^https?:\/\/[^/]+\/(.+?)\/-\/(?:issues|work_items)\/(\d+)$/.exec(textOf(issue.web_url));
