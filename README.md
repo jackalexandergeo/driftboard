@@ -310,7 +310,12 @@ reviewer only mentions in a comment:
   their status. A merge request ready for review brings in nothing by itself (it is in review),
   but is listed on a card its issue has anyway.
 - A draft that works on no open issue gets a card of its own, "Draft MR, no ticket yet". Once its
-  issue is there, that card becomes the issue's card, not a second one.
+  issue is there, that card becomes the issue's card, not a second one. The open card offers
+  **Create GitLab issue**: a second click within a few seconds makes the issue in the merge
+  request's project, titled as it, "Tracks !6.", assigned to you, and adds `Refs #12` to the
+  merge request's description so GitLab links the two. It asks GitLab first and writes nothing
+  unless the merge request is yours, open, and names no open issue; nothing else on the board
+  writes to your tracker.
 - Each press brings the cards ↻ Tickets made up to date, into review and after: new merge
   requests are added, stages change, and one no longer open is marked "merged or closed" rather
   than taken off. The first line follows too, unless you have written over it.
