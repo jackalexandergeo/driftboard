@@ -377,3 +377,21 @@ test('a board deleted while its tickets were read gets none, and no other board 
     await stopBoard(board);
   }
 });
+
+test("a card whose note or description gives the ticket's address is its card; a bare reference is not", async () => {
+  const board = await ticketBoard([
+    gitlabIssue(5, 'Export breaks', { status: TO_DO }), gitlabIssue(6, 'Import breaks', { status: TO_DO }), gitlabIssue(7, 'Sync breaks', { status: TO_DO }),
+  ]);
+  try {
+    const agentCard = (await call(board, 'POST', '/api/items', { source: 'chat', title: 'Exports fail for some users' })).body;
+    await call(board, 'POST', `/api/cards/${agentCard.cardId}/attachments`,
+      { type: 'text', content: 'Created acme/web#5 for this (https://gitlab.example.com/acme/web/-/work_items/5)' });
+    await call(board, 'POST', '/api/items', { source: 'chat', title: 'Import question', body: 'Tracked in https://gitlab.example.com/acme/web/-/issues/6.' });
+    const roundUp = (await call(board, 'POST', '/api/items', { source: 'chat', title: 'Round-up' })).body;
+    await call(board, 'POST', `/api/cards/${roundUp.cardId}/attachments`, { type: 'text', content: 'Other cards: acme/web#7 is in review' });
+    const { body } = await refresh(board);
+    assert.deepEqual([body.added.map((added) => added.title), body.onBoard], [['Sync breaks'], 2]);
+  } finally {
+    await stopBoard(board);
+  }
+});

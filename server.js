@@ -1017,8 +1017,10 @@ app.post('/api/items', (req, res) => {
 
 // ---- Tickets: the user's open tickets, from the trackers in <data>/tickets.json (tickets.js) ----
 // ↻ Tickets puts each ticket still the user's on this board, where new items land, unless it has
-// a card: one the board made for it (deleted, it stays gone) or any card that links it. A ticket
-// in a late stage (review, testing, done) gets none, and nothing starts an agent.
+// a card: one the board made for it (deleted, it stays gone), or any card that links it or gives
+// its address in its description or a note (as an agent does for the ticket it opened). A bare
+// reference does not count: a note may name tickets it is not about. A ticket in a late stage
+// (review, testing, done) gets none, and nothing starts an agent.
 function offersTickets() {
   const config = loadTicketConfig(TICKETS_FILE);
   return config.sources.length > 0 || config.problems.length > 0;
@@ -1026,6 +1028,7 @@ function offersTickets() {
 // A tracker's text in a card's markdown stays text: no tag, picture, emphasis or link under other
 // words made of it. A bare web address in it still shows as a link, to that address.
 const markdownText = (value) => value.replace(/\s+/g, ' ').replace(/[\\`*_[\]()<>!~|]/g, '\\$&');
+const WEB_ADDRESS = /https?:\/\/[^\s<>()[\]"'`]+/g;
 function linkKey(url) {
   try {
     const address = new URL(url);
@@ -1048,12 +1051,19 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
       (tickets) => ({ source, tickets }), (error) => ({ source, problem: error.message }))));
     const ws = getWorkspace(req.params.id);   // the user may have deleted it meanwhile
     if (!ws) return res.status(404).json({ error: 'workspace not found' });
-    const linked = new Set();   // the links cards have, on any board
+    const linked = new Set();   // the addresses cards have, on any board
     for (const w of state.workspaces) {
       for (const card of w.cards) {
+        const texts = [card.description || ''];
         for (const attachment of card.attachments || []) {
-          const key = attachment.type === 'url' && linkKey(attachment.url);
-          if (key) linked.add(key);
+          if (attachment.type === 'url') texts.push(attachment.url);
+          if (attachment.type === 'text') texts.push(attachment.content || '');
+        }
+        for (const text of texts) {
+          for (const [address] of text.matchAll(WEB_ADDRESS)) {
+            const key = linkKey(address.replace(/[.,;:!?]+$/, ''));
+            if (key) linked.add(key);
+          }
         }
       }
     }
