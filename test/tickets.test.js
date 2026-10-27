@@ -1,8 +1,12 @@
-// Reading open tickets from the trackers (tickets.js), with the trackers' tools played by a fake.
-// Run: npm test
+// Reading open tickets from the trackers (tickets.js), with the trackers' tools played by a fake,
+// and ↻ Tickets on a real board on a free port. Run: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { fetchTickets, isLate, parseTicketConfig, SKIP_STATUSES } from '../tickets.js';
+import { call, newDataFolder, startBoard, stopBoard } from './helpers.js';
 
 const gitlab = parseTicketConfig(JSON.stringify({ sources: [{ kind: 'gitlab', host: 'gitlab.example.com' }] })).sources[0];
 const github = parseTicketConfig(JSON.stringify({ sources: [{ kind: 'github' }] })).sources[0];
@@ -116,4 +120,134 @@ test('tickets.json is checked, and each problem says what to write', () => {
   assert.equal(config.skipStatuses, SKIP_STATUSES);
   assert.match(parseTicketConfig('{nope').problems[0], /not JSON/);
   assert.match(parseTicketConfig('{}').problems[0], /needs "sources"/);
+});
+
+// ---- ↻ Tickets on a real board, with glab played by test/fake-glab.js ----
+const FAKE_GLAB = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fake-glab.js');
+const TO_DO = { name: 'To do', category: 'to_do' };
+
+async function ticketBoard(issues, { signIn = false, config } = {}) {
+  const data = newDataFolder();
+  const issuesFile = path.join(data, 'fake-issues.json');
+  fs.writeFileSync(issuesFile, JSON.stringify(issues));
+  const sources = [{ kind: 'gitlab', host: 'gitlab.example.com', command: FAKE_GLAB }];
+  fs.writeFileSync(path.join(data, 'tickets.json'), JSON.stringify(config ?? { sources }));
+  const board = await startBoard(signIn, { data, env: { FAKE_GLAB_ISSUES: issuesFile } });
+  return { ...board, issuesFile };
+}
+
+async function refresh(board, token) {
+  const { activeWorkspaceId } = (await call(board, 'GET', '/api/state', undefined, board.token)).body;
+  return call(board, 'POST', `/api/workspaces/${activeWorkspaceId}/refresh-tickets`, undefined, token);
+}
+
+test('a board without tickets.json offers no ↻ Tickets, and a refresh says where to name the trackers', async () => {
+  const board = await startBoard(false);
+  try {
+    assert.equal((await call(board, 'GET', '/api/state')).body.tickets, false);
+    const { status, body } = await refresh(board);
+    assert.equal(status, 400);
+    assert.match(body.error, /no trackers to read: name them in .*tickets\.json/);
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test('the tickets still the user\'s become cards where new items land, the late ones do not, and no agent starts', async () => {
+  const board = await ticketBoard([
+    gitlabIssue(1, 'Fix login', { status: { name: 'In progress', category: 'in_progress' } }),
+    gitlabIssue(2, 'Add export', { status: { name: 'Awaits Review', category: 'in_progress' } }),
+    gitlabIssue(3, 'Tidy styles', { status: null, labels: ['Status::To Do'] }),
+  ]);
+  try {
+    const state = (await call(board, 'GET', '/api/state')).body;
+    assert.equal(state.tickets, true);
+    const id = state.activeWorkspaceId;
+    const marked = await call(board, 'PATCH', `/api/workspaces/${id}`, { agents: { tool: 'claude' }, autoStart: true });
+    assert.deepEqual([marked.body.agents, marked.body.autoStart], [{ tool: 'claude' }, true]);
+    const { status, body } = await refresh(board);
+    assert.equal(status, 200);
+    assert.deepEqual(body.added.map((added) => added.title), ['Fix login', 'Tidy styles']);
+    assert.deepEqual([body.late, body.onBoard, body.removed, body.problems], [1, 0, 0, []]);
+    const ws = (await call(board, 'GET', `/api/workspaces/${id}`)).body;
+    const made = ws.cards.filter((card) => card.source?.name === 'gitlab');
+    assert.deepEqual(made.map((card) => [card.binderId, card.pressed]), [[ws.binders[0].id, undefined], [ws.binders[0].id, undefined]],
+      'in the first column, with nothing pressed: Autostart is for new items, not for work the user has already');
+    assert.equal(made[0].description, '**acme/web#1** · In progress');
+    assert.deepEqual(made[0].attachments.map((attachment) => [attachment.type, attachment.url, attachment.title]),
+      [['url', 'https://gitlab.example.com/acme/web/-/issues/1', 'acme/web#1']]);
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test('a second refresh adds only what is new, and a card the user deleted stays gone', async () => {
+  const board = await ticketBoard([gitlabIssue(1, 'One', { status: TO_DO }), gitlabIssue(2, 'Two', { status: TO_DO })]);
+  try {
+    const first = (await refresh(board)).body;
+    assert.deepEqual(first.added.map((added) => added.title), ['One', 'Two']);
+    await call(board, 'DELETE', `/api/cards/${first.added[1].cardId}`);
+    fs.writeFileSync(board.issuesFile, JSON.stringify([
+      gitlabIssue(1, 'One', { status: TO_DO }), gitlabIssue(2, 'Two', { status: TO_DO }), gitlabIssue(3, 'Three', { status: TO_DO }),
+    ]));
+    const second = (await refresh(board)).body;
+    assert.deepEqual(second.added.map((added) => added.title), ['Three']);
+    assert.deepEqual([second.onBoard, second.removed], [1, 1]);
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test('a card that already links the ticket is its card, by either of its addresses', async () => {
+  const board = await ticketBoard([gitlabIssue(5, 'Export breaks', { status: TO_DO })]);
+  try {
+    await call(board, 'POST', '/api/items', {
+      source: 'chat', title: 'Someone asked about the export', link: { url: 'https://gitlab.example.com/acme/web/-/work_items/5/' },
+    });
+    const { body } = await refresh(board);
+    assert.deepEqual([body.added, body.onBoard], [[], 1]);
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test('a tracker that fails is named, and the others still come in', async () => {
+  const board = await ticketBoard([gitlabIssue(1, 'One', { status: TO_DO })], { config: { sources: [
+    { kind: 'gitlab', host: 'gitlab.example.com', command: FAKE_GLAB },
+    { kind: 'github', command: 'no-such-tool-for-driftboard' },
+  ] } });
+  try {
+    const { body } = await refresh(board);
+    assert.deepEqual(body.added.map((added) => added.title), ['One']);
+    assert.equal(body.problems.length, 1);
+    assert.match(body.problems[0], /^github: no-such-tool-for-driftboard is not installed/);
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test('a tickets.json with a mistake still offers ↻ Tickets, and a refresh lists what to fix', async () => {
+  const board = await ticketBoard([], { config: { sources: [{ kind: 'jira' }] } });
+  try {
+    assert.equal((await call(board, 'GET', '/api/state')).body.tickets, true);
+    const { status, body } = await refresh(board);
+    assert.equal(status, 400);
+    assert.match(body.problems[0], /"kind" must be one of gitlab, github/);
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test('with sign-in on, a refresh needs the board token: the items key will not do', async () => {
+  const board = await ticketBoard([gitlabIssue(1, 'One', { status: TO_DO })], { signIn: true });
+  try {
+    const itemsKey = fs.readFileSync(path.join(board.data, 'items-key'), 'utf8').trim();
+    assert.equal((await refresh(board, itemsKey)).status, 401);
+    assert.equal((await refresh(board)).status, 401);
+    const { status, body } = await refresh(board, board.token);
+    assert.equal(status, 200);
+    assert.equal(body.added.length, 1);
+  } finally {
+    await stopBoard(board);
+  }
 });

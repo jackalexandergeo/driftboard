@@ -7,6 +7,7 @@ import fsp from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { attachTerminals } from './terminal.js';
+import { fetchTickets, isLate, loadTicketConfig } from './tickets.js';
 import { DATA_DIR, HELPER_SOCKET, HOST, ITEMS_KEY_FILE, LEGACY_DATA_DIR, OPENING_DIR, PIN_FILE, PORT, SIGN_IN, TOKEN_FILE, TOKEN_FORMAT_FILE,
   isLoopback, localURL } from './settings.js';
 
@@ -20,6 +21,7 @@ const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const BOARD_FILE = path.join(DATA_DIR, 'board.json');
 const BOARD_TEMP_FILE = `${BOARD_FILE}.tmp`;
 const BOARD_BACKUP_FILE = `${BOARD_FILE}.bak`; // the copy before the last write
+const TICKETS_FILE = path.join(DATA_DIR, 'tickets.json'); // the user's trackers, for ↻ Tickets (tickets.js)
 
 const STARTER_BINDERS = ['To Do', 'In Progress', 'Blocked', 'Reviewing', 'Completed'];
 const STAGE_TITLES = {
@@ -704,6 +706,7 @@ app.get('/api/state', (req, res) => {
     activeWorkspaceId: state.activeWorkspaceId,
     workspaces: state.workspaces.map((w) => ({ id: w.id, name: w.name, ...(w.agents ? { agents: w.agents } : {}) })),
     notice: state.notice || null,
+    tickets: offersTickets(),
     revision,
   });
 });
@@ -1010,6 +1013,89 @@ app.post('/api/items', (req, res) => {
   remember(card);
   persist();
   res.status(201).json({ cardId: card.id, workspaceId: ws.id, created: true, ...(autoStarted ? { autoStarted: true } : {}) });
+});
+
+// ---- Tickets: the user's open tickets, from the trackers in <data>/tickets.json (tickets.js) ----
+// ↻ Tickets puts each ticket still the user's on this board, where new items land, unless it has
+// a card: one the board made for it (deleted, it stays gone) or any card that links it. A ticket
+// in a late stage (review, testing, done) gets none, and nothing starts an agent.
+function offersTickets() {
+  const config = loadTicketConfig(TICKETS_FILE);
+  return config.sources.length > 0 || config.problems.length > 0;
+}
+function linkKey(url) {
+  try {
+    const address = new URL(url);
+    return `${address.host.toLowerCase()}${address.pathname.replace(/\/+$/, '')}`;
+  } catch {
+    return null;
+  }
+}
+let readingTickets = false;
+app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
+  if (!getWorkspace(req.params.id)) return res.status(404).json({ error: 'workspace not found' });
+  const config = loadTicketConfig(TICKETS_FILE);
+  if (config.problems.length) return res.status(400).json({ error: `${TICKETS_FILE} needs fixing`, problems: config.problems });
+  if (!config.sources.length) return res.status(400).json({ error: `no trackers to read: name them in ${TICKETS_FILE}` });
+  if (readingTickets) return res.status(409).json({ error: 'the tickets are being read already' });
+  readingTickets = true;
+  try {
+    const read = await Promise.all(config.sources.map((source) => fetchTickets(source).then(
+      (tickets) => ({ source, tickets }), (error) => ({ source, problem: error.message }))));
+    const ws = getWorkspace(req.params.id);   // the user may have deleted it meanwhile
+    if (!ws) return res.status(404).json({ error: 'workspace not found' });
+    const linked = new Map();   // link → the card that has it, on any board
+    for (const w of state.workspaces) {
+      for (const card of w.cards) {
+        for (const attachment of card.attachments || []) {
+          const key = attachment.type === 'url' && linkKey(attachment.url);
+          if (key && !linked.has(key)) linked.set(key, card);
+        }
+      }
+    }
+    const binder = ws.binders[0] || null;
+    const answer = { added: [], onBoard: 0, removed: 0, late: 0, problems: [] };
+    let changed = false;
+    for (const { source, tickets, problem } of read) {
+      if (problem) {
+        answer.problems.push(`${source.name}: ${problem}`);
+        continue;
+      }
+      for (const ticket of tickets) {
+        if (isLate(ticket, config.skipStatuses)) {
+          answer.late += 1;
+          continue;
+        }
+        const seen = seenItem(source.name, ticket.id);
+        if (seen) {
+          if (seen[1] && getCard(seen[1])) answer.onBoard += 1;
+          else answer.removed += 1;
+          continue;
+        }
+        const card = [ticket.url, ...ticket.aliases].map((url) => linked.get(linkKey(url))).find(Boolean);
+        if (card) {
+          rememberItem(source.name, ticket.id, card.id);
+          answer.onBoard += 1;
+          changed = true;
+          continue;
+        }
+        const made = itemCard(ws, binder, {
+          title: ticket.title.trim().slice(0, ITEM_LIMITS.title) || ticket.reference,
+          body: [`**${ticket.reference}**`, ticket.status].filter(Boolean).join(' · '),
+          source: source.name,
+          link: webURL(ticket.url) ? { url: ticket.url, title: ticket.reference } : null,
+        });
+        rememberItem(source.name, ticket.id, made.id);
+        if (webURL(ticket.url)) linked.set(linkKey(ticket.url), made);
+        answer.added.push({ cardId: made.id, title: made.title });
+        changed = true;
+      }
+    }
+    if (changed) persist();
+    res.json(answer);
+  } finally {
+    readingTickets = false;
+  }
 });
 
 // The user writes to the card's agent (from the open card, or a script on their behalf), with
