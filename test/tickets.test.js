@@ -136,6 +136,15 @@ test("GitLab: an MR's work is the issues its title, description or commits name,
     'other/app#12 is named on the second page of commits; acme/web#45 is only in a reviewer\'s comment ("conflicts with #45")');
 });
 
+test('GitLab: an issue is named whatever the case of its path, as GitLab takes it', async () => {
+  const { run } = fakeGlab([[]], {
+    mergeRequests: [mergeRequest(3, 'Draft: Fix login', { description: 'Refs Acme/Web#1' })],
+    related: { 'acme/web!3': [relatedIssue('acme/web', 1, 'Fix login')] },
+  });
+  const { tickets } = await fetchTickets(gitlab, run);
+  assert.deepEqual(tickets.map((ticket) => ticket.reference), ['acme/web#1']);
+});
+
 test("GitLab: a merge request that cannot be looked into is named, and the rest of the read stands", async () => {
   const { run } = fakeGlab([[gitlabIssue(1, 'Fix login', { status: TO_DO })]], {
     mergeRequests: [mergeRequest(3, 'Draft: Login API'), mergeRequest(4, 'Draft: Login form', { description: 'Refs acme/web#1' }),

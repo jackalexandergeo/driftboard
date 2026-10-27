@@ -222,7 +222,7 @@ function namesIssue(words, path, iid, project) {
   const forms = [`(?<![\\w.-])(?:${escapeRegExp(path)}|${escapeRegExp(path.split('/').pop())})#${iid}(?!\\d)`,
     `${escapeRegExp(path)}/-/(?:issues|work_items)/${iid}(?!\\d)`];
   if (path === project) forms.push(`(?<![\\w/#!&-])#${iid}(?!\\d)`);
-  return new RegExp(forms.join('|')).test(words);
+  return new RegExp(forms.join('|'), 'i').test(words);   // GitLab takes a path in any case
 }
 
 // The work of the user's open merge requests. An issue often has several (one per repository) and
