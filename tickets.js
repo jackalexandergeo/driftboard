@@ -85,6 +85,9 @@ export function isLate(ticket, skipStatuses = SKIP_STATUSES) {
   return words.some((word) => skipStatuses.some((skip) => word.startsWith(skip)));
 }
 
+// A tracker's answer is read as it comes: a field that is not text is empty, never an error.
+const textOf = (value) => (typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '');
+
 function labelStatus(labels, statusLabels) {
   for (const label of labels) {
     const prefix = statusLabels.find((start) => label.toLowerCase().startsWith(start));
@@ -149,16 +152,19 @@ async function gitlabTickets(source, run) {
   for (let page = 0; page < PAGES; page += 1) {
     const data = await issuesAfter(after);
     for (const issue of data.issues.nodes) {
-      const labels = issue.labels.nodes.map((label) => label.title);
-      const form = /\/-\/(issues|work_items)\/(\d+)$/.exec(issue.webUrl);
+      const url = textOf(issue?.webUrl);
+      const reference = textOf(issue?.reference);
+      if (!reference) continue;   // nothing to know it by
+      const labels = (issue.labels?.nodes || []).map((label) => textOf(label?.title));
+      const form = /\/-\/(issues|work_items)\/(\d+)$/.exec(url);
       tickets.push({
-        id: `${source.host}/${issue.reference}`,
-        url: issue.webUrl,
-        aliases: form ? [issue.webUrl.slice(0, form.index) + `/-/${form[1] === 'issues' ? 'work_items' : 'issues'}/${form[2]}`] : [],
-        title: issue.title,
-        reference: issue.reference,
-        status: issue.status?.name || labelStatus(labels, source.statusLabels),
-        category: issue.status?.category || '',
+        id: `${source.host}/${reference}`,
+        url,
+        aliases: form ? [url.slice(0, form.index) + `/-/${form[1] === 'issues' ? 'work_items' : 'issues'}/${form[2]}`] : [],
+        title: textOf(issue.title),
+        reference,
+        status: textOf(issue.status?.name) || labelStatus(labels, source.statusLabels),
+        category: textOf(issue.status?.category).toLowerCase(),
       });
     }
     if (!data.issues.pageInfo.hasNextPage) break;
@@ -176,15 +182,19 @@ async function githubTickets(source, run) {
     const issues = parsed(await run(source.command, ['api', '--hostname', source.host, path]), source.command);
     if (!Array.isArray(issues)) throw new Error(`${source.command} did not answer a list of issues`);
     for (const issue of issues) {
-      if (issue.pull_request) continue;   // the same list carries pull requests
-      const reference = `${issue.repository?.full_name ?? ''}#${issue.number}`;
+      if (!issue || issue.pull_request) continue;   // the same list carries pull requests
+      const repository = textOf(issue.repository?.full_name);
+      const number = textOf(issue.number);
+      if (!repository || !number) continue;   // nothing to know it by
+      const reference = `${repository}#${number}`;
+      const labels = (Array.isArray(issue.labels) ? issue.labels : []).map((label) => textOf(typeof label === 'string' ? label : label?.name));
       tickets.push({
         id: `${source.host}/${reference}`,
-        url: issue.html_url,
+        url: textOf(issue.html_url),
         aliases: [],
-        title: issue.title,
+        title: textOf(issue.title),
         reference,
-        status: labelStatus((issue.labels || []).map((label) => (typeof label === 'string' ? label : label.name)), source.statusLabels),
+        status: labelStatus(labels, source.statusLabels),
         category: '',
       });
     }

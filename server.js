@@ -1093,6 +1093,9 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
     }
     if (changed) persist();
     res.json(answer);
+  } catch (error) {   // Express 4 would not catch it: the board would stop
+    console.error('reading tickets failed:', error);
+    res.status(500).json({ error: `reading tickets failed: ${error.message}` });
   } finally {
     readingTickets = false;
   }

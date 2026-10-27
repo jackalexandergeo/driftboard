@@ -251,3 +251,20 @@ test('with sign-in on, a refresh needs the board token: the items key will not d
     await stopBoard(board);
   }
 });
+
+test('a tracker answer of the wrong shape leaves the board up, and the rest of its tickets come in', async () => {
+  const board = await ticketBoard([
+    { ...gitlabIssue(1, 'Fine', { status: TO_DO }) },
+    { ...gitlabIssue(2, 'x', { status: { name: 7, category: 'TO_DO' } }), title: null },
+    { ...gitlabIssue(3, 'No labels', { status: TO_DO }), labels: null },
+  ]);
+  try {
+    const { status, body } = await refresh(board);
+    assert.equal(status, 200);
+    assert.deepEqual(body.added.map((added) => added.title), ['Fine', 'acme/web#2', 'No labels'],
+      'a ticket without a title is named by its reference');
+    assert.equal((await call(board, 'GET', '/api/state')).status, 200, 'the board still answers');
+  } finally {
+    await stopBoard(board);
+  }
+});
