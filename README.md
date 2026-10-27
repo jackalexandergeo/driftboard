@@ -298,8 +298,9 @@ its reference and status, and a link to it. A ticket gets no card when:
   does for the ticket it opened). A bare reference like `acme/web#5` in a note does not count: a
   note may name tickets it is not about.
 
-On GitLab it also reads your open merge requests, and which issues each works on (GitLab's own
-link, not a `#123` read out of a description):
+On GitLab it also reads your open merge requests, and which issues each works on: the ones GitLab
+links to it that its title, description or commit messages name (`Refs acme/web#5`), not one a
+reviewer only mentions in a comment:
 
 - An issue often has several merge requests, one per repository, so the card stays the issue's,
   and its merge requests are links on it named by repository, number and stage (`web!6 ·
@@ -310,9 +311,11 @@ link, not a `#123` read out of a description):
   but is listed on a card its issue has anyway.
 - A draft that works on no open issue gets a card of its own, "Draft MR, no ticket yet". Once its
   issue is there, that card becomes the issue's card, not a second one.
-- Each press brings the cards ↻ Tickets made up to date: new merge requests are added, stages
-  change, and one no longer open is marked "merged or closed" rather than taken off. The first
-  line follows too, unless you have written over it.
+- Each press brings the cards ↻ Tickets made up to date, into review and after: new merge
+  requests are added, stages change, and one no longer open is marked "merged or closed" rather
+  than taken off. The first line follows too, unless you have written over it.
+- A merge request GitLab cannot answer for is named in the press's message, and the rest still
+  comes in.
 
 Press it whenever you like; it only adds what is new, and says what it did ("3 new tickets in
 To Do · 2 cards brought up to date · 11 on the board already · 5 in review or later"). It never starts an agent, Autostart
