@@ -782,3 +782,18 @@ test("Create GitLab issue on a draft's own card makes the issue, names it in the
     await stopBoard(board);
   }
 });
+
+test("Create GitLab issue writes only to the GitLab the card's merge request is on", async () => {
+  const board = await ticketBoard({ issues: [], mergeRequests: [mergeRequest(6, 'Draft: Tidy the toolbar')], related: {} });
+  try {
+    const cardId = (await refresh(board)).body.added[0].cardId;
+    const moved = { sources: [{ kind: 'gitlab', name: 'gitlab', host: 'gitlab.other.example', command: FAKE_GLAB }] };
+    fs.writeFileSync(path.join(board.data, 'tickets.json'), JSON.stringify(moved));
+    const { status, body } = await call(board, 'POST', `/api/cards/${cardId}/create-ticket`);
+    assert.equal(status, 400);
+    assert.match(body.error, /gitlab\.example\.com/);
+    assert.deepEqual(board.writes(), [], 'nothing written to the other GitLab');
+  } finally {
+    await stopBoard(board);
+  }
+});

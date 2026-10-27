@@ -1252,6 +1252,10 @@ app.post('/api/cards/:id/create-ticket', async (req, res) => {
   }
   const source = loadTicketConfig(TICKETS_FILE).sources.find((each) => each.name === owner.name);
   if (!source) return res.status(400).json({ error: `${owner.name} is not in ${TICKETS_FILE} any more` });
+  const host = owner.mergeRequest.id.split('/')[0];   // ids are <host>/<reference>
+  if (host !== source.host) {
+    return res.status(400).json({ error: `${owner.mergeRequest.reference} is on ${host}, and ${owner.name} is ${source.host} now: nothing was made` });
+  }
   if (creatingTickets.has(found.card.id)) return res.status(409).json({ error: 'its issue is being made already' });
   creatingTickets.add(found.card.id);
   try {
