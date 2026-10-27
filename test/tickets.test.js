@@ -300,3 +300,14 @@ test('deleting a card that only linked a ticket lets the next refresh bring the 
     await stopBoard(board);
   }
 });
+
+test("an item that takes a ticket's source and id is the item's card, and the ticket still gets its own", async () => {
+  const board = await ticketBoard([gitlabIssue(1, 'One', { status: TO_DO })]);
+  try {
+    await call(board, 'POST', '/api/items', { source: 'gitlab', externalId: 'gitlab.example.com/acme/web#1', title: 'A ping' });
+    const { body } = await refresh(board);
+    assert.deepEqual([body.added.map((added) => added.title), body.onBoard], [['One'], 0]);
+  } finally {
+    await stopBoard(board);
+  }
+});

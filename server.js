@@ -1061,12 +1061,13 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
         answer.problems.push(`${source.name}: ${problem}`);
         continue;
       }
+      const memory = `ticket:${source.name}`;   // apart from items: no item's source has a colon
       for (const ticket of tickets) {
         if (isLate(ticket, config.skipStatuses)) {
           answer.late += 1;
           continue;
         }
-        const seen = seenItem(source.name, ticket.id);
+        const seen = seenItem(memory, ticket.id);
         if (seen) {
           if (seen[1] && getCard(seen[1])) answer.onBoard += 1;
           else answer.removed += 1;
@@ -1083,7 +1084,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
           source: source.name,
           link: webURL(ticket.url) ? { url: ticket.url, title: ticket.reference } : null,
         });
-        rememberItem(source.name, ticket.id, made.id);
+        rememberItem(memory, ticket.id, made.id);
         if (webURL(ticket.url)) linked.add(linkKey(ticket.url));
         answer.added.push({ cardId: made.id, title: made.title });
         changed = true;
