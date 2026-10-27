@@ -913,8 +913,10 @@ function showTicketsTool(offered) {
   $('refresh-tickets-btn').classList.toggle('hidden', !ticketsOffered);
 }
 // A draft's own card (no ticket yet) offers to make its GitLab issue (server.js, create-ticket). It
-// writes to GitLab, so the first click only asks; the second, within a few seconds, makes it.
+// writes to GitLab, so the first click only asks; the second, within a few seconds, makes it. A
+// double-click or a held Enter is not a second thought: the question must have had time to be read.
 let ticketArmed = null;
+let ticketArmedAt = 0;
 function showTicketActions(card) {
   const mergeRequest = ticketsOffered && card.source?.mergeRequest;
   $('ticket-actions').classList.toggle('hidden', !mergeRequest);
@@ -926,15 +928,17 @@ function showTicketActions(card) {
   button.disabled = false; button.textContent = 'Create GitLab issue';
   button.title = `Makes an issue in ${project}, titled as the merge request and assigned to you, and adds "Refs #…" to its description`;
 }
-$('create-ticket-btn').addEventListener('click', async () => {
+$('create-ticket-btn').addEventListener('click', async (event) => {
   const card = currentCard();
   const button = $('create-ticket-btn');
   if (!card?.source?.mergeRequest) return;
   if (!ticketArmed) {
     button.textContent = `Make it in ${card.source.mergeRequest.reference.split('!')[0]}?`;
     ticketArmed = setTimeout(() => showTicketActions(card), 4000);
+    ticketArmedAt = Date.now();
     return;
   }
+  if (event.detail > 1 || Date.now() - ticketArmedAt < 600) return;
   clearTimeout(ticketArmed); ticketArmed = null;
   button.disabled = true; button.textContent = 'Making it…';
   try {
