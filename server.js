@@ -1032,10 +1032,14 @@ const markdownText = (value) => value.replace(/\s+/g, ' ').replace(/[\\`*_[\]()<
 // The first line of the card made for a ticket: its reference, its status, and how its merge
 // requests stand ("**acme/web#5** · In progress · 3 MRs: 2 draft, 1 ready").
 function ticketSummary(ticket) {
-  const total = ticket.mergeRequests.length;
-  const drafts = ticket.mergeRequests.filter((link) => link.stage === 'draft').length;
-  const stand = total ? `${total} MR${total === 1 ? '' : 's'}: ${[drafts && `${drafts} draft`, total - drafts && `${total - drafts} ready`].filter(Boolean).join(', ')}` : '';
-  return [`**${markdownText(ticket.reference)}**`, markdownText(ticket.status), stand].filter(Boolean).join(' · ');
+  return [`**${markdownText(ticket.reference)}**`, markdownText(ticket.status), mergeRequestStand(ticket.mergeRequests.map((link) => link.stage))]
+    .filter(Boolean).join(' · ');
+}
+// "3 MRs: 2 draft, 1 ready" for the stages of open merge requests; nothing for none.
+function mergeRequestStand(stages) {
+  const drafts = stages.filter((stage) => stage === 'draft').length;
+  const ready = stages.length - drafts;
+  return stages.length ? `${stages.length} MR${stages.length === 1 ? '' : 's'}: ${[drafts && `${drafts} draft`, ready && `${ready} ready`].filter(Boolean).join(', ')}` : '';
 }
 // A merge request's link on a card says which and how it stands: "web!6 · draft".
 const mergeRequestTitle = (link) => `${link.reference.split('/').pop()} · ${link.stage}`;
@@ -1077,8 +1081,10 @@ function syncMergeRequests(card, ticket, whole) {
 }
 // Every merge request link on a tracker's cards against its open merge requests now, whether or not
 // the card's ticket is still in the list (closed, say): a stage brought up to date, and one no longer
-// open marked so, not taken off (it is the work's history). Answers the cards it changed.
-function restageMergeRequests(sourceName, mergeRequests) {
+// open marked so, not taken off (it is the work's history). A card no ticket followed this press
+// (followed: card ids) has its first line's count of merge requests follow its links, while the line
+// is the refresh's. Answers the cards it changed.
+function restageMergeRequests(sourceName, mergeRequests, followed) {
   const open = new Map(mergeRequests.filter((link) => webURL(link.url)).map((link) => [linkKey(link.url), link]));
   const changed = [];
   for (const w of state.workspaces) {
@@ -1091,6 +1097,16 @@ function restageMergeRequests(sourceName, mergeRequests) {
         const title = link ? mergeRequestTitle(link) : `${String(attachment.title || '').split(' · ')[0]} · ${NO_LONGER_OPEN}`;
         if (attachment.title !== title) {
           attachment.title = title;
+          moved = true;
+        }
+      }
+      if (!followed.has(card.id) && card.source.summary !== undefined && card.description === card.source.summary) {
+        const stages = card.attachments.filter((attachment) => attachment.type === 'url' && attachment.mergeRequest)
+          .map((attachment) => open.get(linkKey(attachment.url))?.stage).filter(Boolean);
+        const line = [card.source.summary.replace(/ · \d+ MRs?: [^·]*$/, ''), mergeRequestStand(stages)].filter(Boolean).join(' · ');
+        if (line !== card.description) {
+          card.description = line;
+          card.source.summary = line;
           moved = true;
         }
       }
@@ -1144,6 +1160,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
     const binder = ws.binders[0] || null;
     const answer = { added: [], updated: 0, onBoard: 0, removed: 0, late: 0, problems: [] };
     const updated = new Set();   // the cards brought up to date, each once
+    const followed = new Set();  // the cards a ticket in the list followed
     for (const { source, tickets, mergeRequests = null, problems = [], problem } of read) {
       if (problem) {
         answer.problems.push(`${source.name}: ${problem}`);
@@ -1157,6 +1174,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
         const seen = seenItem(memory, ticket.id);
         if (seen) {   // its card follows it, into review too
           const held = seen[1] && getCard(seen[1]);
+          if (held) followed.add(held.card.id);
           if (held && syncMergeRequests(held.card, ticket, whole)) updated.add(held.card.id);
           if (late) answer.late += 1;
           else if (held) answer.onBoard += 1;
@@ -1185,6 +1203,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
               createdAt: now(), order: adopted.card.attachments.length });
           }
           syncMergeRequests(adopted.card, ticket, whole);
+          followed.add(adopted.card.id);
           updated.add(adopted.card.id);
           continue;
         }
@@ -1196,12 +1215,13 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
         });
         Object.assign(made.source, { summary: made.description, ticket: ticket.id });
         syncMergeRequests(made, ticket, whole);
+        followed.add(made.id);
         rememberItem(memory, ticket.id, made.id);
         if (webURL(ticket.url)) linked.add(linkKey(ticket.url));
         answer.added.push({ cardId: made.id, title: made.title });
         changed = true;
       }
-      if (mergeRequests) for (const card of restageMergeRequests(source.name, mergeRequests)) updated.add(card.id);
+      if (mergeRequests) for (const card of restageMergeRequests(source.name, mergeRequests, followed)) updated.add(card.id);
     }
     for (const made of answer.added) updated.delete(made.cardId);
     answer.updated = updated.size;

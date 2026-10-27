@@ -564,7 +564,8 @@ test('a card keeps up when its draft goes ready and its issue to review, and whe
     fs.writeFileSync(board.issuesFile, JSON.stringify(stage(null, undefined)));
     assert.equal((await refresh(board)).body.updated, 1);
     card = await cardOf(board, cardId);
-    assert.deepEqual(linksOf(card), ['acme/web#5', 'web!9 · merged or closed'], 'its ticket gone from the list, its links still follow');
+    assert.deepEqual([card.description, linksOf(card)], ['**acme/web#5** · In review', ['acme/web#5', 'web!9 · merged or closed']],
+      'its ticket gone from the list, its links and their count still follow');
   } finally {
     await stopBoard(board);
   }
