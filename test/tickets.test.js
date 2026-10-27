@@ -248,8 +248,9 @@ test('GitHub: every page of 100 is read, and the last short one ends it', async 
 });
 
 // GitLab for making an issue: who the user is, the merge request, what it works on, and the writes.
-function fakeGitLabWrites({ mergeRequest, me = { id: 7 }, related = [], editFails = false }) {
+function fakeGitLabWrites({ mergeRequest, me = { id: 7 }, related = [], editFails = false, editedMeanwhile }) {
   const calls = [];
+  let reads = 0;
   const run = async (command, args, input) => {
     const method = args.includes('-X') ? args[args.indexOf('-X') + 1] : 'GET';
     const endpoint = args[args.length - 1];
@@ -257,7 +258,10 @@ function fakeGitLabWrites({ mergeRequest, me = { id: 7 }, related = [], editFail
     if (endpoint === 'user') return JSON.stringify(me);
     if (endpoint.includes('/related_issues')) return JSON.stringify(related);
     if (endpoint.includes('/commits')) return '[]';
-    if (method === 'GET' && /\/merge_requests\/\d+$/.test(endpoint)) return JSON.stringify(mergeRequest);
+    if (method === 'GET' && /\/merge_requests\/\d+$/.test(endpoint)) {
+      reads += 1;
+      return JSON.stringify(reads > 1 && editedMeanwhile !== undefined ? { ...mergeRequest, description: editedMeanwhile } : mergeRequest);
+    }
     if (method === 'POST' && endpoint.endsWith('/issues')) {
       return JSON.stringify({ iid: 12, web_url: 'https://gitlab.example.com/acme/web/-/issues/12', assignees: [{ id: me.id }] });
     }
@@ -292,6 +296,12 @@ test("GitLab: no issue is made for a merge request not the user's, not open, or 
     assert.ok(calls.every((call) => call.method === 'GET'), `${why}: nothing written`);
   }
   await assert.rejects(createIssueForMergeRequest(gitlab, 'acme/web#6', fakeGitLabWrites({ mergeRequest: myDraft }).run), /no GitLab merge request/);
+});
+
+test("GitLab: an edit made to the draft's description while the issue was made is kept", async () => {
+  const { run, calls } = fakeGitLabWrites({ mergeRequest: myDraft, editedMeanwhile: 'Caches the index.\nAlso warms it.' });
+  await createIssueForMergeRequest(gitlab, 'acme/web!6', run);
+  assert.deepEqual(calls.find((call) => call.method === 'PUT').body, { description: 'Caches the index.\nAlso warms it.\n\nRefs #12' });
 });
 
 test('GitLab: an issue made, but the draft not editable, says so rather than failing', async () => {

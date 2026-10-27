@@ -407,7 +407,9 @@ export async function createIssueForMergeRequest(source, reference, run = runToo
   const made = { reference: `${project}#${issue.iid}`, url: textOf(issue.web_url), stage: mergeRequest.draft === true ? 'draft' : 'ready',
     assigned: (issue.assignees || []).some((user) => user?.id === me.id) };
   try {
-    await call(`${base}/merge_requests/${iid}`, 'PUT', { description: [description.trimEnd(), `Refs #${issue.iid}`].filter(Boolean).join('\n\n') });
+    // Read again just before writing: an edit made on GitLab while the issue was made is kept.
+    const now = textOf((await call(`${base}/merge_requests/${iid}`))?.description);
+    await call(`${base}/merge_requests/${iid}`, 'PUT', { description: [now.trimEnd(), `Refs #${issue.iid}`].filter(Boolean).join('\n\n') });
     return { ...made, linked: true };
   } catch (error) {
     return { ...made, linked: error.message };
