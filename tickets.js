@@ -267,6 +267,7 @@ async function addMergeRequestWork(source, tickets, graphql, run, onTime, proble
     const messages = async () => {
       const read = [];
       for (let page = 1; page <= COMMIT_PAGES; page += 1) {
+        onTime();
         const commits = await ask(`commits?per_page=100&page=${page}`);
         read.push(...commits.map((commit) => textOf(commit?.message)));
         if (commits.length < 100) break;
@@ -281,6 +282,7 @@ async function addMergeRequestWork(source, tickets, graphql, run, onTime, proble
         return issue?.state === 'opened' && where && namesIssue(named, where[1], where[2], project);
       });
     } catch (error) {
+      if (error.outOfTime) throw error;   // the whole read's, not this merge request's
       unanswered.push({ link, error });
       return null;
     }
@@ -364,7 +366,7 @@ async function githubTickets(source, run, onTime) {
 export function fetchTickets(source, run = runTool, { readTime = READ_TIME } = {}) {
   const giveUpAt = Date.now() + readTime;
   const onTime = () => {
-    if (Date.now() >= giveUpAt) throw new Error(`reading ${source.host} took longer than ${readTime / 1000} s`);
+    if (Date.now() >= giveUpAt) throw Object.assign(new Error(`reading ${source.host} took longer than ${readTime / 1000} s`), { outOfTime: true });
   };
   return source.kind === 'gitlab' ? gitlabTickets(source, run, onTime) : githubTickets(source, run, onTime);
 }

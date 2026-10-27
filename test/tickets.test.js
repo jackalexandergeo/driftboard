@@ -157,6 +157,17 @@ test('GitLab: out of time before the merge requests, the issues read stand and t
   assert.deepEqual(problems, ['merge requests not read: reading gitlab.example.com took longer than 0 s']);
 });
 
+test("GitLab: the read's time counts across a merge request's pages of commits too", async () => {
+  const { run } = fakeGlab([[gitlabIssue(1, 'Fix login', { status: TO_DO })]], {
+    mergeRequests: [mergeRequest(3, 'Draft: Long work')], related: { 'acme/web!3': [relatedIssue('acme/web', 1, 'Fix login')] },
+    commits: { 'acme/web!3': [...Array(250).fill('chore: step'), 'Refs acme/web#1'] }, commitPageTime: 100,
+  });
+  const { tickets, mergeRequests, problems } = await fetchTickets(gitlab, run, { readTime: 150 });
+  assert.deepEqual([tickets.map((ticket) => ticket.reference), mergeRequests], [['acme/web#1'], null]);
+  assert.deepEqual(problems, ['merge requests not read: reading gitlab.example.com took longer than 0.15 s'],
+    'out of time is the whole read\'s, not one merge request\'s');
+});
+
 test('GitLab without issue statuses: the labels say it', async () => {
   const { run } = fakeGlab([[gitlabIssue(4, 'Old instance', { labels: ['status::in review'] })]], { statusField: false });
   const { tickets: [ticket] } = await fetchTickets(gitlab, run);
