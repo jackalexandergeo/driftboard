@@ -1040,9 +1040,9 @@ function ticketSummary(ticket) {
 // A merge request's link on a card says which and how it stands: "web!6 · draft".
 const mergeRequestTitle = (link) => `${link.reference.split('/').pop()} · ${link.stage}`;
 const NO_LONGER_OPEN = 'merged or closed';
-// The card's links to the ticket's merge requests, as they stand now: new ones added, stages brought
-// up to date, and ones no longer open marked so, not taken off (they are the work's history). The
-// first line the refresh wrote follows, unless the user has written over it. Answers whether it changed.
+// The card's links to the ticket's merge requests, as they stand now: new ones added and stages
+// brought up to date (one no longer open is marked by restageMergeRequests). The first line the
+// refresh wrote follows, unless the user has written over it. Answers whether the card changed.
 function syncMergeRequests(card, ticket) {
   let changed = false;
   const open = new Map(ticket.mergeRequests.filter((link) => webURL(link.url)).map((link) => [linkKey(link.url), link]));
@@ -1050,10 +1050,8 @@ function syncMergeRequests(card, ticket) {
     if (attachment.type !== 'url') continue;
     const key = linkKey(attachment.url);
     const link = open.get(key);
-    const title = link ? mergeRequestTitle(link)
-      : attachment.mergeRequest && `${String(attachment.title || '').split(' · ')[0]} · ${NO_LONGER_OPEN}`;
-    if (title && attachment.title !== title) {
-      Object.assign(attachment, { title, mergeRequest: true });
+    if (link && attachment.title !== mergeRequestTitle(link)) {
+      Object.assign(attachment, { title: mergeRequestTitle(link), mergeRequest: true });
       changed = true;
     }
     open.delete(key);
@@ -1072,6 +1070,33 @@ function syncMergeRequests(card, ticket) {
     card.source.summary = summary;
   }
   if (changed) card.updatedAt = now();
+  return changed;
+}
+// Every merge request link on a tracker's cards against its open merge requests now, whether or not
+// the card's ticket is still in the list (closed, say): a stage brought up to date, and one no longer
+// open marked so, not taken off (it is the work's history). Answers the cards it changed.
+function restageMergeRequests(sourceName, mergeRequests) {
+  const open = new Map(mergeRequests.filter((link) => webURL(link.url)).map((link) => [linkKey(link.url), link]));
+  const changed = [];
+  for (const w of state.workspaces) {
+    for (const card of w.cards) {
+      if (card.source?.name !== sourceName) continue;
+      let moved = false;
+      for (const attachment of card.attachments || []) {
+        if (attachment.type !== 'url' || !attachment.mergeRequest) continue;
+        const link = open.get(linkKey(attachment.url));
+        const title = link ? mergeRequestTitle(link) : `${String(attachment.title || '').split(' · ')[0]} · ${NO_LONGER_OPEN}`;
+        if (attachment.title !== title) {
+          attachment.title = title;
+          moved = true;
+        }
+      }
+      if (moved) {
+        card.updatedAt = now();
+        changed.push(card);
+      }
+    }
+  }
   return changed;
 }
 const WEB_ADDRESS = /https?:\/\/[^\s<>()[\]"'`]+/g;
@@ -1115,7 +1140,8 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
     }
     const binder = ws.binders[0] || null;
     const answer = { added: [], updated: 0, onBoard: 0, removed: 0, late: 0, problems: [] };
-    for (const { source, tickets, problems = [], problem } of read) {
+    const updated = new Set();   // the cards brought up to date, each once
+    for (const { source, tickets, mergeRequests = null, problems = [], problem } of read) {
       if (problem) {
         answer.problems.push(`${source.name}: ${problem}`);
         continue;
@@ -1123,22 +1149,18 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
       answer.problems.push(...problems.map((part) => `${source.name}: ${part}`));
       const memory = `ticket:${source.name}`;   // apart from items: no item's source has a colon
       for (const ticket of tickets) {
-        if (isLate(ticket, config.skipStatuses)) {
-          answer.late += 1;
+        const late = isLate(ticket, config.skipStatuses);
+        const seen = seenItem(memory, ticket.id);
+        if (seen) {   // its card follows it, into review too
+          const held = seen[1] && getCard(seen[1]);
+          if (held && syncMergeRequests(held.card, ticket)) updated.add(held.card.id);
+          if (late) answer.late += 1;
+          else if (held) answer.onBoard += 1;
+          else answer.removed += 1;
           continue;
         }
-        const seen = seenItem(memory, ticket.id);
-        if (seen) {
-          const held = seen[1] && getCard(seen[1]);
-          if (!held) {
-            answer.removed += 1;
-            continue;
-          }
-          answer.onBoard += 1;
-          if (syncMergeRequests(held.card, ticket)) {
-            answer.updated += 1;
-            changed = true;
-          }
+        if (late) {
+          answer.late += 1;
           continue;
         }
         // Not remembered: that card is about something else too, and once it goes the ticket is due one.
@@ -1155,8 +1177,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
               createdAt: now(), order: adopted.card.attachments.length });
           }
           syncMergeRequests(adopted.card, ticket);
-          answer.updated += 1;
-          changed = true;
+          updated.add(adopted.card.id);
           continue;
         }
         const made = itemCard(ws, binder, {
@@ -1172,7 +1193,11 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
         answer.added.push({ cardId: made.id, title: made.title });
         changed = true;
       }
+      if (mergeRequests) for (const card of restageMergeRequests(source.name, mergeRequests)) updated.add(card.id);
     }
+    for (const made of answer.added) updated.delete(made.cardId);
+    answer.updated = updated.size;
+    if (updated.size) changed = true;
     if (changed) persist();
     res.json(answer);
   } catch (error) {   // Express 4 would not catch it: the board would stop

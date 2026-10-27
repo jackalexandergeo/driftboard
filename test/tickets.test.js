@@ -546,3 +546,26 @@ test("a draft's own card becomes its ticket's card once the ticket is there, not
     await stopBoard(board);
   }
 });
+
+test('a card keeps up when its draft goes ready and its issue to review, and when both are done', async () => {
+  const stage = (status, draft) => ({
+    issues: status ? [gitlabIssue(5, 'Fix export', { status: { name: status, category: 'in_progress' } })] : [],
+    mergeRequests: draft === undefined ? [] : [mergeRequest(9, 'Draft: Fix export', { draft, description: 'Refs acme/web#5' })],
+    related: { 'acme/web!9': [relatedIssue('acme/web', 5, 'Fix export')] },
+  });
+  const board = await ticketBoard(stage('In progress', true));
+  try {
+    const cardId = (await refresh(board)).body.added[0].cardId;
+    fs.writeFileSync(board.issuesFile, JSON.stringify(stage('In review', false)));
+    const inReview = (await refresh(board)).body;
+    assert.deepEqual([inReview.late, inReview.updated], [1, 1], 'still counted as in review, and its card brought up to date');
+    let card = await cardOf(board, cardId);
+    assert.deepEqual([card.description, linksOf(card)], ['**acme/web#5** · In review · 1 MR: 1 ready', ['acme/web#5', 'web!9 · ready']]);
+    fs.writeFileSync(board.issuesFile, JSON.stringify(stage(null, undefined)));
+    assert.equal((await refresh(board)).body.updated, 1);
+    card = await cardOf(board, cardId);
+    assert.deepEqual(linksOf(card), ['acme/web#5', 'web!9 · merged or closed'], 'its ticket gone from the list, its links still follow');
+  } finally {
+    await stopBoard(board);
+  }
+});
