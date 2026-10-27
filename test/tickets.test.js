@@ -569,3 +569,25 @@ test('a card keeps up when its draft goes ready and its issue to review, and whe
     await stopBoard(board);
   }
 });
+
+test("a draft's own card is adopted by one ticket only, when the draft works on two", async () => {
+  const board = await ticketBoard({ issues: [], mergeRequests: [mergeRequest(6, 'Draft: Tidy the toolbar')], related: {} });
+  try {
+    await refresh(board);
+    fs.writeFileSync(board.issuesFile, JSON.stringify({
+      issues: [],
+      mergeRequests: [mergeRequest(6, 'Draft: Tidy the toolbar', { description: 'Refs #1, #2' }), mergeRequest(7, 'Draft: Toolbar icons', { description: 'Refs #1' })],
+      related: { 'acme/web!6': [relatedIssue('acme/web', 1, 'Toolbar is cluttered'), relatedIssue('acme/web', 2, 'Toolbar overflows')],
+        'acme/web!7': [relatedIssue('acme/web', 1, 'Toolbar is cluttered')] },
+    }));
+    const second = (await refresh(board)).body;
+    assert.deepEqual([second.added.length, second.updated], [1, 1], 'one ticket takes the draft\'s card, the other gets its own');
+    const { activeWorkspaceId } = (await call(board, 'GET', '/api/state')).body;
+    const cards = (await call(board, 'GET', `/api/workspaces/${activeWorkspaceId}`)).body.cards.filter((card) => card.source?.name === 'gitlab');
+    assert.deepEqual(cards.map((card) => card.description).sort(), ['**acme/web#1** · 2 MRs: 2 draft', '**acme/web#2** · 1 MR: 1 draft']);
+    assert.ok(!cards.some((card) => linksOf(card).some((title) => title.endsWith('merged or closed'))), 'no open draft is marked gone');
+    assert.equal((await refresh(board)).body.updated, 0, 'and the next press finds nothing to change');
+  } finally {
+    await stopBoard(board);
+  }
+});

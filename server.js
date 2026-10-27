@@ -1168,10 +1168,14 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
           answer.onBoard += 1;
           continue;
         }
-        // A draft's own card, made before its issue had a ticket, becomes that ticket's card.
-        const adopted = ticket.mergeRequests.map((link) => seenItem(memory, link.id)?.[1]).map((cardId) => cardId && getCard(cardId)).find(Boolean);
+        // A draft's own card, made before its issue had a ticket, becomes that ticket's card: one
+        // ticket's only, if the draft works on two (a card says whose it is, source.ticket).
+        const adopted = ticket.mergeRequests
+          .map((link) => { const cardId = seenItem(memory, link.id)?.[1]; return cardId && getCard(cardId); })
+          .find((held, index) => held && held.card.source?.ticket === ticket.mergeRequests[index].id);
         if (adopted) {
           rememberItem(memory, ticket.id, adopted.card.id);
+          adopted.card.source.ticket = ticket.id;
           if (webURL(ticket.url)) {
             adopted.card.attachments.push({ id: randomUUID(), type: 'url', url: webURL(ticket.url), title: ticket.reference,
               createdAt: now(), order: adopted.card.attachments.length });
@@ -1186,7 +1190,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
           source: source.name,
           link: webURL(ticket.url) ? { url: ticket.url, title: ticket.reference } : null,
         });
-        made.source.summary = made.description;
+        Object.assign(made.source, { summary: made.description, ticket: ticket.id });
         syncMergeRequests(made, ticket);
         rememberItem(memory, ticket.id, made.id);
         if (webURL(ticket.url)) linked.add(linkKey(ticket.url));
