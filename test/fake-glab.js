@@ -27,7 +27,7 @@ if (failing) {
 }
 const mine = (project, iid) => (Array.isArray(mergeRequests) ? mergeRequests : []).find((each) => each.reference === `${project}!${iid}`);
 let answer;
-if (endpoint === 'user') answer = { id: 7, username: 'pat' };
+if (endpoint === 'user') answer = { id: 7, username: 'pat', email: 'pat@example.com' };
 else if (method === 'GET' && /^projects\/.+\/issues\?/.test(endpoint)) answer = [];
 else if (rest) answer = rest[3] === 'commits' ? [] : related[`${decodeURIComponent(rest[1])}!${rest[2]}`] ?? [];
 else if (mergeRequest) {
@@ -37,6 +37,6 @@ else if (mergeRequest) {
   answer = { iid: 12, web_url: `https://gitlab.example.com/${decodeURIComponent(newIssue[1])}/-/issues/12`,
     assignees: (body.assignee_ids || []).map((id) => ({ id })) };
 } else if (query.includes('authoredMergeRequests')) answer = { data: { currentUser: { authoredMergeRequests: page(mergeRequests) } } };
-else if (query.includes('currentUser')) answer = { data: { currentUser: { username: 'pat' } } };
+else if (query.includes('currentUser')) answer = { data: { currentUser: { username: 'pat', name: 'Pat Doe', emails: { nodes: [{ email: 'pat@example.com' }] } } } };
 else answer = { data: { issues: page(issues) } };
 process.stdout.write(JSON.stringify(answer));

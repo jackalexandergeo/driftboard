@@ -170,8 +170,16 @@ async function gitlabTickets(source, run, onTime) {
     if (answer.errors?.length) throw new Error(answer.errors.map((error) => error.message).join('; '));
     return answer.data;
   };
-  const me = (await graphql('query { currentUser { username } }')).currentUser;
+  let me;
+  try {
+    me = (await graphql('query { currentUser { username name publicEmail commitEmail emails { nodes { email } } } }')).currentUser;
+  } catch (error) {
+    if (!/doesn't exist|permission|not authorized/i.test(error.message)) throw error;
+    me = (await graphql('query { currentUser { username name } }')).currentUser;   // an older GitLab, or no read_user: by name
+  }
   if (!me) throw new Error(`${source.command} is not signed in to ${source.host}`);
+  const mine = authorOf({ username: me.username, name: me.name,
+    emails: [me.publicEmail, me.commitEmail, ...(me.emails?.nodes || []).map((node) => node?.email)] });
   let query = GITLAB_ISSUES(true);
   const issuesAfter = async (after) => {
     const variables = { username: me.username, ...(after ? { after } : {}) };
@@ -213,7 +221,7 @@ async function gitlabTickets(source, run, onTime) {
   let mergeRequests = null;
   try {
     onTime();
-    mergeRequests = await addMergeRequestWork(source, tickets, graphql, run, onTime, problems);
+    mergeRequests = await addMergeRequestWork(source, tickets, graphql, run, onTime, problems, mine);
   } catch (error) {
     problems.push(`merge requests not read: ${error.message}`);
   }
@@ -230,9 +238,18 @@ function namesIssue(words, path, iid, project) {
   return new RegExp(forms.join('|'), 'i').test(words);   // GitLab takes a path in any case
 }
 
+// Whether the user wrote a commit: by one of their emails, or by their username or name where GitLab
+// gave no email. A branch carries colleagues' commits too (one merged in, a long-lived branch).
+function authorOf({ username, name, emails }) {
+  const known = new Set(emails.map((email) => textOf(email).trim().toLowerCase()).filter(Boolean));
+  const names = new Set([username, name].map((each) => textOf(each).trim().toLowerCase()).filter(Boolean));
+  return (commit) => (known.size ? known.has(textOf(commit?.author_email).trim().toLowerCase())
+    : names.has(textOf(commit?.author_name).trim().toLowerCase()));
+}
+
 // The open issues GitLab links to a merge request that its own words name: its title and
-// description (words) and its commit messages.
-async function openIssuesNamedBy(source, run, onTime, project, iid, words) {
+// description (words), and the messages of the commits the user wrote in it (mine).
+async function openIssuesNamedBy(source, run, onTime, project, iid, words, mine) {
   const ask = async (what) => {
     const answer = parsed(await run(source.command, ['api', '--hostname', source.host,
       `projects/${encodeURIComponent(project)}/merge_requests/${iid}/${what}`]), source.command);
@@ -243,7 +260,7 @@ async function openIssuesNamedBy(source, run, onTime, project, iid, words) {
     for (let page = 1; page <= COMMIT_PAGES; page += 1) {
       onTime();
       const commits = await ask(`commits?per_page=100&page=${page}`);
-      read.push(...commits.map((commit) => textOf(commit?.message)));
+      read.push(...commits.filter(mine).map((commit) => textOf(commit?.message)));
       if (commits.length < 100) break;
     }
     return read;
@@ -266,7 +283,7 @@ async function openIssuesNamedBy(source, run, onTime, project, iid, words) {
 // messages name: GitLab also links an issue a reviewer only mentions in a comment ("conflicts with
 // #45"), which is not this work. One whose issues cannot be looked up is named in problems and left
 // out of both.
-async function addMergeRequestWork(source, tickets, graphql, run, onTime, problems) {
+async function addMergeRequestWork(source, tickets, graphql, run, onTime, problems, mine) {
   const open = [];
   let after = null;
   for (let page = 0; page < PAGES; page += 1) {
@@ -291,7 +308,7 @@ async function addMergeRequestWork(source, tickets, graphql, run, onTime, proble
   const worksOn = await eachAtOnce(open, async ({ project, iid, words, link }) => {
     onTime();
     try {
-      return await openIssuesNamedBy(source, run, onTime, project, iid, words);
+      return await openIssuesNamedBy(source, run, onTime, project, iid, words, mine);
     } catch (error) {
       if (error.outOfTime) throw error;   // the whole read's, not this merge request's
       unanswered.push({ link, error });
@@ -399,7 +416,8 @@ export async function createIssueForMergeRequest(source, reference, run = runToo
   if (mergeRequest?.state !== 'opened') throw new Error(`${reference} is not open any more`);
   if (!me?.id || mergeRequest.author?.id !== me.id) throw new Error(`${reference} is not yours`);
   const description = textOf(mergeRequest.description);
-  const named = await openIssuesNamedBy(source, run, () => {}, project, iid, `${textOf(mergeRequest.title)}\n${description}`);
+  const mine = authorOf({ username: me.username, name: me.name, emails: [me.email, me.commit_email, me.public_email] });
+  const named = await openIssuesNamedBy(source, run, () => {}, project, iid, `${textOf(mergeRequest.title)}\n${description}`, mine);
   if (named.length) throw new Error(`${reference} works on ${textOf(named[0].web_url)} already: the next refresh puts it there`);
   // One a press made before, cut off before it could name it in the merge request (the board stopped):
   // that one is named now, not a second made.

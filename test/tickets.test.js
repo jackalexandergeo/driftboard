@@ -32,7 +32,7 @@ function relatedIssue(project, iid, title, { state = 'opened', form = 'issues' }
 
 // glab, answering GraphQL (who the user is, pages of their issues, their merge requests) and the
 // REST list of the issues each merge request works on, from related: {"<project>!<iid>": [issue]}.
-function fakeGlab(pages, { statusField = true, mergeRequests = [], related = {}, commits = {}, commitPageTime = 0 } = {}) {
+function fakeGlab(pages, { statusField = true, mergeRequests = [], related = {}, commits = {}, commitPageTime = 0, emails = true } = {}) {
   const calls = [];
   const run = async (command, args) => {
     calls.push([command, ...args]);
@@ -44,13 +44,17 @@ function fakeGlab(pages, { statusField = true, mergeRequests = [], related = {},
     if (commitsOf) {
       await new Promise((resolve) => setTimeout(resolve, commitPageTime));
       const all = commits[`${decodeURIComponent(commitsOf[1])}!${commitsOf[2]}`] ?? [];
-      return JSON.stringify(all.slice((commitsOf[3] - 1) * 100, commitsOf[3] * 100).map((message) => ({ message })));
+      return JSON.stringify(all.slice((commitsOf[3] - 1) * 100, commitsOf[3] * 100)
+        .map((commit) => (typeof commit === 'string' ? { message: commit, author_name: 'pat', author_email: 'pat@example.com' } : commit)));
     }
     const query = args[args.indexOf('-f') + 1];
     if (query.includes('authoredMergeRequests')) {
       return JSON.stringify({ data: { currentUser: { authoredMergeRequests: { pageInfo: { hasNextPage: false }, nodes: mergeRequests } } } });
     }
-    if (query.includes('currentUser')) return JSON.stringify({ data: { currentUser: { username: 'pat' } } });
+    if (query.includes('currentUser') && query.includes('emails') && !emails) throw new Error("glab: Field 'emails' doesn't exist on type 'CurrentUser'");
+    if (query.includes('currentUser')) {
+      return JSON.stringify({ data: { currentUser: { username: 'pat', name: 'Pat Doe', ...(emails ? { emails: { nodes: [{ email: 'Pat@example.com' }] } } : {}) } } });
+    }
     if (!statusField && query.includes('status {')) throw new Error("glab: Field 'status' doesn't exist on type 'Issue'");
     const after = args.find((arg) => arg.startsWith('after='))?.slice('after='.length);
     const index = after ? Number(after) : 0;
@@ -143,6 +147,23 @@ test('GitLab: an issue is named whatever the case of its path, as GitLab takes i
   });
   const { tickets } = await fetchTickets(gitlab, run);
   assert.deepEqual(tickets.map((ticket) => ticket.reference), ['acme/web#1']);
+});
+
+test("GitLab: an MR's commits count only when the user wrote them, by email, or by name where GitLab gives none", async () => {
+  const work = (emails) => fakeGlab([[]], {
+    emails,
+    mergeRequests: [mergeRequest(3, 'Draft: A long-lived branch')],
+    related: { 'acme/web!3': [relatedIssue('acme/web', 1, 'Fix login'), relatedIssue('acme/web', 2, 'Purge items')] },
+    commits: { 'acme/web!3': [
+      { message: 'fix(login): keep the session\n\nRefs acme/web#1', author_name: 'Pat Doe', author_email: 'pat@example.com' },
+      { message: 'feat(items): purge\n\nRefs acme/web#2', author_name: 'Sam', author_email: 'sam@example.com' },
+    ] },
+  });
+  for (const emails of [true, false]) {
+    const { tickets } = await fetchTickets(gitlab, work(emails).run);
+    assert.deepEqual(tickets.map((ticket) => ticket.reference), ['acme/web#1'],
+      `acme/web#2 is only in a colleague's commit carried on the same branch (${emails ? 'emails' : 'names'})`);
+  }
 });
 
 test("GitLab: a merge request that cannot be looked into is named, and the rest of the read stands", async () => {
@@ -248,7 +269,7 @@ test('GitHub: every page of 100 is read, and the last short one ends it', async 
 });
 
 // GitLab for making an issue: who the user is, the merge request, what it works on, and the writes.
-function fakeGitLabWrites({ mergeRequest, me = { id: 7 }, related = [], editFails = false, editedMeanwhile, earlier = [] }) {
+function fakeGitLabWrites({ mergeRequest, me = { id: 7, username: 'pat', email: 'pat@example.com' }, related = [], editFails = false, editedMeanwhile, earlier = [] }) {
   const calls = [];
   let reads = 0;
   const run = async (command, args, input) => {
