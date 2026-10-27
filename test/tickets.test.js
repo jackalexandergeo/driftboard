@@ -307,7 +307,8 @@ test("GitLab: an issue a cut-off press made already for the draft is named, not 
   assert.deepEqual([made.reference, made.assigned, made.linked], ['acme/web#11', true, true]);
   assert.ok(!calls.some((call) => call.method === 'POST'), 'no second issue');
   assert.deepEqual(calls.find((call) => call.method === 'PUT').body, { description: 'Caches the index.\n\nRefs #11' });
-  assert.ok(calls.some((call) => call.endpoint.includes('/issues?') && call.endpoint.includes('author_id=7')), 'only the user\'s own are looked at');
+  assert.ok(calls.some((call) => call.endpoint.includes('/issues?') && call.endpoint.includes('author_id=7') && call.endpoint.includes('search=Tracks&')),
+    'only the user\'s own are looked at, by the plain word');
 });
 
 test("GitLab: an edit made to the draft's description while the issue was made is kept", async () => {
