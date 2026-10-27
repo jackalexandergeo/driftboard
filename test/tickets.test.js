@@ -119,6 +119,8 @@ test('tickets.json is checked, and each problem says what to write', () => {
   assert.match(config.problems[3], /"skipStatuses" must be a list/);
   assert.equal(config.skipStatuses, SKIP_STATUSES);
   assert.match(parseTicketConfig('{nope').problems[0], /not JSON/);
+  assert.match(parseTicketConfig('{"sources": [{"kind": "constructor"}]}').problems[0], /"kind" must be one of/,
+    'only the kinds there are, not what every object inherits');
   assert.match(parseTicketConfig('{}').problems[0], /needs "sources"/);
 });
 
@@ -264,6 +266,21 @@ test('a tracker answer of the wrong shape leaves the board up, and the rest of i
     assert.deepEqual(body.added.map((added) => added.title), ['Fine', 'acme/web#2', 'No labels'],
       'a ticket without a title is named by its reference');
     assert.equal((await call(board, 'GET', '/api/state')).status, 200, 'the board still answers');
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test('a tickets.json the board cannot read leaves the board up, and a refresh says why', async () => {
+  const data = newDataFolder();
+  fs.mkdirSync(path.join(data, 'tickets.json'));
+  const board = await startBoard(false, { data });
+  try {
+    const state = await call(board, 'GET', '/api/state');
+    assert.deepEqual([state.status, state.body.tickets], [200, true]);
+    const { status, body } = await refresh(board);
+    assert.equal(status, 400);
+    assert.match(body.problems[0], /cannot read .*tickets\.json/);
   } finally {
     await stopBoard(board);
   }

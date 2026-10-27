@@ -32,7 +32,7 @@ export function parseTicketConfig(text) {
   const names = new Set();
   given.sources.forEach((source, index) => {
     const where = `sources[${index}]`;
-    const kind = KINDS[source?.kind];
+    const kind = Object.hasOwn(KINDS, source?.kind ?? '') ? KINDS[source.kind] : null;
     if (!kind) return config.problems.push(`${where}: "kind" must be one of ${Object.keys(KINDS).join(', ')}`);
     const host = source.host ?? kind.host;
     const name = source.name ?? source.kind;
@@ -60,20 +60,20 @@ export function parseTicketConfig(text) {
   return config;
 }
 
-// The file is read again only when it changed, so an edit counts at the next press.
+// The file is read again only when it changed, so an edit counts at the next press. One that
+// cannot be read is a problem to show, never an error: the board reads it for every page.
 let cached = null;
 export function loadTicketConfig(file) {
-  let stat;
   try {
-    stat = fs.statSync(file);
+    const stat = fs.statSync(file);
+    if (cached?.file !== file || cached.mtimeMs !== stat.mtimeMs || cached.size !== stat.size) {
+      cached = { file, mtimeMs: stat.mtimeMs, size: stat.size, config: parseTicketConfig(fs.readFileSync(file, 'utf8')) };
+    }
+    return cached.config;
   } catch (error) {
     if (error.code === 'ENOENT') return { sources: [], skipStatuses: SKIP_STATUSES, problems: [] };
     return { sources: [], skipStatuses: SKIP_STATUSES, problems: [`cannot read ${file}: ${error.message}`] };
   }
-  if (cached?.file !== file || cached.mtimeMs !== stat.mtimeMs || cached.size !== stat.size) {
-    cached = { file, mtimeMs: stat.mtimeMs, size: stat.size, config: parseTicketConfig(fs.readFileSync(file, 'utf8')) };
-  }
-  return cached.config;
 }
 
 // Whether a ticket is past the user's part. Its status's category counts first where the
