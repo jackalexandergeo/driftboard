@@ -21,12 +21,27 @@ function gitlabIssue(number, title, { status, labels = [], form = 'issues' } = {
   };
 }
 
-// glab, answering GraphQL: who the user is, then pages of their issues.
-function fakeGlab(pages, { statusField = true } = {}) {
+function mergeRequest(iid, title, { draft = true, project = 'acme/web' } = {}) {
+  return { iid: String(iid), title, draft, webUrl: `https://gitlab.example.com/${project}/-/merge_requests/${iid}`,
+    reference: `${project}!${iid}`, project: { fullPath: project } };
+}
+
+function relatedIssue(project, iid, title, { state = 'opened', form = 'issues' } = {}) {
+  return { iid, title, state, web_url: `https://gitlab.example.com/${project}/-/${form}/${iid}` };
+}
+
+// glab, answering GraphQL (who the user is, pages of their issues, their merge requests) and the
+// REST list of the issues each merge request works on, from related: {"<project>!<iid>": [issue]}.
+function fakeGlab(pages, { statusField = true, mergeRequests = [], related = {} } = {}) {
   const calls = [];
   const run = async (command, args) => {
     calls.push([command, ...args]);
+    const rest = /^projects\/(.+)\/merge_requests\/(\d+)\/related_issues$/.exec(args[3]);
+    if (rest) return JSON.stringify(related[`${decodeURIComponent(rest[1])}!${rest[2]}`] ?? []);
     const query = args[args.indexOf('-f') + 1];
+    if (query.includes('authoredMergeRequests')) {
+      return JSON.stringify({ data: { currentUser: { authoredMergeRequests: { pageInfo: { hasNextPage: false }, nodes: mergeRequests } } } });
+    }
     if (query.includes('currentUser')) return JSON.stringify({ data: { currentUser: { username: 'pat' } } });
     if (!statusField && query.includes('status {')) throw new Error("glab: Field 'status' doesn't exist on type 'Issue'");
     const after = args.find((arg) => arg.startsWith('after='))?.slice('after='.length);
@@ -71,6 +86,34 @@ test('GitLab: every page is read, and an issue is known by both its addresses', 
   assert.deepEqual(tickets.map((ticket) => ticket.title), ['One', 'Two']);
   assert.deepEqual(tickets[1].aliases, ['https://gitlab.example.com/acme/web/-/issues/2']);
   assert.deepEqual(tickets[0].aliases, ['https://gitlab.example.com/acme/web/-/work_items/1']);
+});
+
+test("GitLab: a draft MR brings in the open issues it works on, the user's or not, and they are not late", async () => {
+  const { run } = fakeGlab([[gitlabIssue(1, 'Fix login', { status: { name: 'Awaits Review', category: 'in_progress' } })]], {
+    mergeRequests: [mergeRequest(3, 'Draft: Fix login for real')],
+    related: { 'acme/web!3': [relatedIssue('acme/web', 1, 'Fix login'), relatedIssue('other/app', 9, 'Login API', { form: 'work_items' }),
+      relatedIssue('acme/web', 2, 'Old login bug', { state: 'closed' })] },
+  });
+  const tickets = await fetchTickets(gitlab, run);
+  assert.deepEqual(tickets.map((ticket) => [ticket.reference, ticket.kind, isLate(ticket), ticket.mergeRequests.map((link) => link.reference)]), [
+    ['acme/web#1', 'issue', false, ['acme/web!3']],
+    ['other/app#9', 'issue', false, ['acme/web!3']],
+  ], 'awaiting review by its status, but a draft says the work goes on; a closed issue is done');
+  assert.deepEqual([tickets[1].url, tickets[1].aliases], ['https://gitlab.example.com/other/app/-/work_items/9', ['https://gitlab.example.com/other/app/-/issues/9']]);
+});
+
+test("GitLab: a ready MR is listed on its issue's ticket but brings in no work, and a draft with no open issue is work of its own", async () => {
+  const { run } = fakeGlab([[gitlabIssue(8, 'Search is slow', { status: TO_DO })]], {
+    mergeRequests: [mergeRequest(4, 'Draft: Tidy the toolbar'), mergeRequest(5, 'Speed up search', { draft: false }),
+      mergeRequest(6, 'Bump a dependency', { draft: false })],
+    related: { 'acme/web!5': [relatedIssue('acme/web', 8, 'Search is slow'), relatedIssue('acme/web', 7, 'Search ranks badly')] },
+  });
+  const tickets = await fetchTickets(gitlab, run);
+  assert.deepEqual(tickets.map((ticket) => [ticket.id, ticket.kind, ticket.title, ticket.status, isLate(ticket),
+    ticket.mergeRequests.map((link) => `${link.reference} · ${link.stage}`)]), [
+    ['gitlab.example.com/acme/web#8', 'issue', 'Search is slow', 'To do', false, ['acme/web!5 · ready']],
+    ['gitlab.example.com/acme/web!4', 'mergeRequest', 'Tidy the toolbar', 'Draft MR, no ticket yet', false, []],
+  ], 'acme/web#7 is not the user\'s and only in review; a ready MR on no issue is review, not work');
 });
 
 test('GitLab without issue statuses: the labels say it', async () => {

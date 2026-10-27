@@ -1,6 +1,7 @@
-// The user's open tickets, from the trackers they name in <data>/tickets.json, for ↻ Tickets.
-// Each tracker is read through its own command-line tool (glab, gh) and the login the user
-// already has there: the board keeps no tracker token of its own.
+// The user's open tickets, from the trackers they name in <data>/tickets.json, for ↻ Tickets,
+// and on GitLab the work of their draft merge requests too. Each tracker is read through its own
+// command-line tool (glab, gh) and the login the user already has there: the board keeps no
+// tracker token of its own.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 
@@ -13,6 +14,7 @@ const KINDS = { gitlab: { host: 'gitlab.com', command: 'glab' }, github: { host:
 const SOURCE_NAME = /^[a-z0-9][a-z0-9._-]*$/;   // as an item's source
 const HOST_NAME = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d+)?$/i;
 const PAGES = 20;          // at most this many pages of 100 tickets from one tracker
+const AT_ONCE = 6;         // calls to a tracker at the same time
 const TOOL_TIMEOUT = 60_000;
 const ANSWER_LIMIT = 32 * 1024 * 1024;
 // One tracker's whole read, its pages together: well inside the time a browser's request lasts.
@@ -79,10 +81,11 @@ export function loadTicketConfig(file) {
   }
 }
 
-// Whether a ticket is past the user's part. Its status's category counts first where the
-// tracker has one (GitLab's done and canceled), then the words of its name: GitLab files a
-// custom "Awaits Review" under in progress.
+// Whether a ticket is past the user's part. A draft merge request on it says it is not, whatever
+// its status. Else its status's category counts first where the tracker has one (GitLab's done
+// and canceled), then the words of its name: GitLab files a custom "Awaits Review" under in progress.
 export function isLate(ticket, skipStatuses = SKIP_STATUSES) {
+  if (ticket.active) return false;
   if (['done', 'canceled'].includes(ticket.category)) return true;
   const words = (ticket.status || '').toLowerCase().replace(/’/g, "'").split(/[\s_/-]+/).filter(Boolean);
   return words.some((word) => skipStatuses.some((skip) => word.startsWith(skip)));
@@ -113,6 +116,21 @@ export function runTool(command, args) {
   });
 }
 
+// An issue's address in both its forms: GitLab answers /-/issues/N or /-/work_items/N.
+function issueAddresses(url) {
+  const form = /\/-\/(issues|work_items)\/(\d+)$/.exec(url);
+  return { url, aliases: form ? [url.slice(0, form.index) + `/-/${form[1] === 'issues' ? 'work_items' : 'issues'}/${form[2]}`] : [] };
+}
+
+// run(item) for each item, AT_ONCE at a time, answers in order.
+async function eachAtOnce(items, run) {
+  const answers = [];
+  for (let start = 0; start < items.length; start += AT_ONCE) {
+    answers.push(...await Promise.all(items.slice(start, start + AT_ONCE).map(run)));
+  }
+  return answers;
+}
+
 function parsed(output, command) {
   try {
     return JSON.parse(output);
@@ -127,6 +145,14 @@ const GITLAB_ISSUES = (withStatus) => `query($username: String!, $after: String)
   issues(assigneeUsernames: [$username], state: opened, first: 100, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes { webUrl title reference(full: true) labels { nodes { title } }${withStatus ? ' status { name category }' : ''} }
+  }
+}`;
+const GITLAB_MERGE_REQUESTS = `query($after: String) {
+  currentUser {
+    authoredMergeRequests(state: opened, first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { iid title draft webUrl reference(full: true) project { fullPath } }
+    }
   }
 }`;
 
@@ -160,22 +186,90 @@ async function gitlabTickets(source, run, onTime) {
       const reference = textOf(issue?.reference);
       if (!reference) continue;   // nothing to know it by
       const labels = (issue.labels?.nodes || []).map((label) => textOf(label?.title));
-      const form = /\/-\/(issues|work_items)\/(\d+)$/.exec(url);
       tickets.push({
         id: `${source.host}/${reference}`,
-        url,
-        aliases: form ? [url.slice(0, form.index) + `/-/${form[1] === 'issues' ? 'work_items' : 'issues'}/${form[2]}`] : [],
+        kind: 'issue',
+        ...issueAddresses(url),
         title: textOf(issue.title),
         reference,
         status: textOf(issue.status?.name) || labelStatus(labels, source.statusLabels),
         category: textOf(issue.status?.category).toLowerCase(),
+        mergeRequests: [],
+        active: false,
       });
     }
     if (!data.issues.pageInfo.hasNextPage) break;
     onTime();
     after = data.issues.pageInfo.endCursor;
   }
+  onTime();
+  await addMergeRequestWork(source, tickets, graphql, run, onTime);
   return tickets;
+}
+
+// The work of the user's open merge requests. An issue often has several (one per repository) and
+// a merge request may work on several issues, so each issue's ticket lists all of its merge
+// requests with their stage, draft or ready. A draft is work going on: the issues it works on are
+// the user's work now, assigned to them or not, whatever their status. One ready for review brings
+// in no work by itself (it is in review, late like an issue awaiting review); it is listed on the
+// ticket its issue has anyway. A draft that works on no open issue is work of its own, with no
+// ticket yet.
+async function addMergeRequestWork(source, tickets, graphql, run, onTime) {
+  const open = [];
+  let after = null;
+  for (let page = 0; page < PAGES; page += 1) {
+    const found = (await graphql(GITLAB_MERGE_REQUESTS, after ? { after } : {})).currentUser?.authoredMergeRequests;
+    if (!found) break;
+    for (const mergeRequest of found.nodes || []) {
+      const reference = textOf(mergeRequest?.reference);
+      const project = textOf(mergeRequest?.project?.fullPath);
+      const iid = textOf(mergeRequest?.iid);
+      if (!reference || !project || !iid) continue;
+      open.push({
+        project, iid,
+        link: { id: `${source.host}/${reference}`, reference, url: textOf(mergeRequest.webUrl),
+          title: textOf(mergeRequest.title).replace(/^(draft|wip):\s*/i, ''), stage: mergeRequest.draft === true ? 'draft' : 'ready' },
+      });
+    }
+    if (!found.pageInfo?.hasNextPage) break;
+    onTime();
+    after = found.pageInfo.endCursor;
+  }
+  const worksOn = await eachAtOnce(open, async ({ project, iid }) => {
+    onTime();
+    const endpoint = `projects/${encodeURIComponent(project)}/merge_requests/${iid}/related_issues`;
+    const issues = parsed(await run(source.command, ['api', '--hostname', source.host, endpoint]), source.command);
+    return Array.isArray(issues) ? issues.filter((issue) => issue?.state === 'opened') : [];
+  });
+  const issues = new Map();   // id → {issue, reference, links}: every open issue an open merge request works on
+  open.forEach(({ link }, index) => {
+    let working = 0;
+    for (const issue of worksOn[index]) {
+      const where = /^https?:\/\/[^/]+\/(.+?)\/-\/(?:issues|work_items)\/(\d+)$/.exec(textOf(issue.web_url));
+      if (!where) continue;
+      const reference = `${where[1]}#${where[2]}`;
+      const id = `${source.host}/${reference}`;
+      if (!issues.has(id)) issues.set(id, { issue, reference, links: [] });
+      issues.get(id).links.push(link);
+      working += 1;
+    }
+    if (!working && link.stage === 'draft') {
+      tickets.push({ id: link.id, kind: 'mergeRequest', url: link.url, aliases: [], title: link.title, reference: link.reference,
+        status: 'Draft MR, no ticket yet', category: '', mergeRequests: [], active: true });
+    }
+  });
+  const byId = new Map(tickets.map((ticket) => [ticket.id, ticket]));
+  for (const [id, { issue, reference, links }] of issues) {
+    const drafted = links.some((link) => link.stage === 'draft');
+    let ticket = byId.get(id);
+    if (!ticket) {
+      if (!drafted) continue;   // only in review, and not the user's ticket
+      ticket = { id, kind: 'issue', ...issueAddresses(textOf(issue.web_url)), title: textOf(issue.title), reference, status: '', category: '' };
+      tickets.push(ticket);
+    }
+    ticket.mergeRequests = links;
+    ticket.active = ticket.active || drafted;
+  }
 }
 
 // GitHub: the open issues assigned to the user in every repository they can see. Issues have
@@ -195,12 +289,15 @@ async function githubTickets(source, run, onTime) {
       const labels = (Array.isArray(issue.labels) ? issue.labels : []).map((label) => textOf(typeof label === 'string' ? label : label?.name));
       tickets.push({
         id: `${source.host}/${reference}`,
+        kind: 'issue',
         url: textOf(issue.html_url),
         aliases: [],
         title: textOf(issue.title),
         reference,
         status: labelStatus(labels, source.statusLabels),
         category: '',
+        mergeRequests: [],
+        active: false,
       });
     }
     if (issues.length < 100) break;
@@ -209,7 +306,8 @@ async function githubTickets(source, run, onTime) {
   return tickets;
 }
 
-// [{id, url, aliases, title, reference, status, category}]: the open tickets assigned to the user.
+// [{id, kind, url, aliases, title, reference, status, category, mergeRequests: [{id, reference, url, title,
+// stage}], active}]: the open tickets assigned to the user, and on GitLab the work of their merge requests.
 export function fetchTickets(source, run = runTool, { readTime = READ_TIME } = {}) {
   const giveUpAt = Date.now() + readTime;
   const onTime = () => {
