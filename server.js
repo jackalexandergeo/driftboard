@@ -1044,12 +1044,12 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
       (tickets) => ({ source, tickets }), (error) => ({ source, problem: error.message }))));
     const ws = getWorkspace(req.params.id);   // the user may have deleted it meanwhile
     if (!ws) return res.status(404).json({ error: 'workspace not found' });
-    const linked = new Map();   // link → the card that has it, on any board
+    const linked = new Set();   // the links cards have, on any board
     for (const w of state.workspaces) {
       for (const card of w.cards) {
         for (const attachment of card.attachments || []) {
           const key = attachment.type === 'url' && linkKey(attachment.url);
-          if (key && !linked.has(key)) linked.set(key, card);
+          if (key) linked.add(key);
         }
       }
     }
@@ -1072,11 +1072,9 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
           else answer.removed += 1;
           continue;
         }
-        const card = [ticket.url, ...ticket.aliases].map((url) => linked.get(linkKey(url))).find(Boolean);
-        if (card) {
-          rememberItem(source.name, ticket.id, card.id);
+        // Not remembered: that card is about something else too, and once it goes the ticket is due one.
+        if ([ticket.url, ...ticket.aliases].some((url) => linked.has(linkKey(url)))) {
           answer.onBoard += 1;
-          changed = true;
           continue;
         }
         const made = itemCard(ws, binder, {
@@ -1086,7 +1084,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
           link: webURL(ticket.url) ? { url: ticket.url, title: ticket.reference } : null,
         });
         rememberItem(source.name, ticket.id, made.id);
-        if (webURL(ticket.url)) linked.set(linkKey(ticket.url), made);
+        if (webURL(ticket.url)) linked.add(linkKey(ticket.url));
         answer.added.push({ cardId: made.id, title: made.title });
         changed = true;
       }

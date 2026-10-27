@@ -285,3 +285,18 @@ test('a tickets.json the board cannot read leaves the board up, and a refresh sa
     await stopBoard(board);
   }
 });
+
+test('deleting a card that only linked a ticket lets the next refresh bring the ticket in', async () => {
+  const board = await ticketBoard([gitlabIssue(5, 'Export breaks', { status: TO_DO })]);
+  try {
+    const chat = (await call(board, 'POST', '/api/items', {
+      source: 'chat', title: 'Someone asked about the export', link: { url: 'https://gitlab.example.com/acme/web/-/issues/5' },
+    })).body;
+    assert.equal((await refresh(board)).body.onBoard, 1);
+    await call(board, 'DELETE', `/api/cards/${chat.cardId}`);
+    const { body } = await refresh(board);
+    assert.deepEqual([body.added.map((added) => added.title), body.removed], [['Export breaks'], 0]);
+  } finally {
+    await stopBoard(board);
+  }
+});
