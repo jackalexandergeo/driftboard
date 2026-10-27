@@ -103,10 +103,11 @@ function labelStatus(labels, statusLabels) {
   return '';
 }
 
-// Runs a tracker's tool, without a shell. A failure says what the tool said, in short.
-export function runTool(command, args) {
+// Runs a tracker's tool, without a shell, with input on its stdin if given (a JSON body). A failure
+// says what the tool said, in short.
+export function runTool(command, args, input) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { timeout: TOOL_TIMEOUT, maxBuffer: ANSWER_LIMIT }, (error, stdout, stderr) => {
+    const tool = execFile(command, args, { timeout: TOOL_TIMEOUT, maxBuffer: ANSWER_LIMIT }, (error, stdout, stderr) => {
       if (!error) return resolve(stdout);
       if (error.code === 'ENOENT') return reject(new Error(`${command} is not installed, or not on the board's PATH: give its full path as "command"`));
       if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return reject(new Error(`${command} answered more than ${ANSWER_LIMIT / 1024 / 1024} MB`));
@@ -114,6 +115,7 @@ export function runTool(command, args) {
       const said = String(stderr || error.message).trim().split('\n').filter(Boolean).slice(-2).join(' ');
       reject(new Error(said.slice(0, 300) || `${command} failed`));
     });
+    tool.stdin.end(input ?? '');
   });
 }
 

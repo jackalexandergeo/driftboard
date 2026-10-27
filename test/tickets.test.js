@@ -189,6 +189,12 @@ test('GitLab: a tool that is not signed in says so', async () => {
   await assert.rejects(fetchTickets(gitlab, run), /not signed in to gitlab\.example\.com/);
 });
 
+test('a tool gets its input on stdin, and none when there is none', async () => {
+  const echo = ['-e', "let read = ''; process.stdin.on('data', (part) => { read += part; }).on('end', () => process.stdout.write(`[${read}]`))"];
+  assert.equal(await runTool(process.execPath, echo, '{"title":"x"}'), '[{"title":"x"}]');
+  assert.equal(await runTool(process.execPath, echo), '[]', 'and a tool that reads stdin is not left waiting');
+});
+
 test('a tool that answers too much says so, not that it was slow', async () => {
   await assert.rejects(runTool(process.execPath, ['-e', "process.stdout.write('x'.repeat(34 * 1024 * 1024))"]),
     /answered more than 32 MB/);
