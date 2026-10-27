@@ -7,7 +7,7 @@ import fsp from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { attachTerminals } from './terminal.js';
-import { fetchTickets, isLate, loadTicketConfig } from './tickets.js';
+import { createIssueForMergeRequest, fetchTickets, isLate, loadTicketConfig } from './tickets.js';
 import { DATA_DIR, HELPER_SOCKET, HOST, ITEMS_KEY_FILE, LEGACY_DATA_DIR, OPENING_DIR, PIN_FILE, PORT, SIGN_IN, TOKEN_FILE, TOKEN_FORMAT_FILE,
   isLoopback, localURL } from './settings.js';
 
@@ -1174,8 +1174,9 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
         const seen = seenItem(memory, ticket.id);
         if (seen) {   // its card follows it, into review too
           const held = seen[1] && getCard(seen[1]);
-          if (held) followed.add(held.card.id);
-          if (held && syncMergeRequests(held.card, ticket, whole)) updated.add(held.card.id);
+          const its = held && (held.card.source?.ticket ?? ticket.id) === ticket.id;   // not since another ticket's
+          if (its) followed.add(held.card.id);
+          if (its && syncMergeRequests(held.card, ticket, whole)) updated.add(held.card.id);
           if (late) answer.late += 1;
           else if (held) answer.onBoard += 1;
           else answer.removed += 1;
@@ -1198,6 +1199,7 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
         if (adopted) {
           rememberItem(memory, ticket.id, adopted.card.id);
           adopted.card.source.ticket = ticket.id;
+          delete adopted.card.source.mergeRequest;
           if (webURL(ticket.url)) {
             adopted.card.attachments.push({ id: randomUUID(), type: 'url', url: webURL(ticket.url), title: ticket.reference,
               createdAt: now(), order: adopted.card.attachments.length });
@@ -1213,7 +1215,8 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
           source: source.name,
           link: webURL(ticket.url) ? { url: ticket.url, title: ticket.reference } : null,
         });
-        Object.assign(made.source, { summary: made.description, ticket: ticket.id });
+        Object.assign(made.source, { summary: made.description, ticket: ticket.id },
+          ticket.kind === 'mergeRequest' ? { mergeRequest: { id: ticket.id, reference: ticket.reference, url: ticket.url } } : {});
         syncMergeRequests(made, ticket, whole);
         followed.add(made.id);
         rememberItem(memory, ticket.id, made.id);
@@ -1234,6 +1237,46 @@ app.post('/api/workspaces/:id/refresh-tickets', async (req, res) => {
     res.status(500).json({ error: `reading tickets failed: ${error.message}` });
   } finally {
     readingTickets = false;
+  }
+});
+
+// Create GitLab issue, on a draft's own card (one with no ticket yet): the issue is made on GitLab
+// (createIssueForMergeRequest), and the card is its ticket's card at once.
+const creatingTickets = new Set();
+app.post('/api/cards/:id/create-ticket', async (req, res) => {
+  const found = getCard(req.params.id);
+  if (!found) return res.status(404).json({ error: 'card not found' });
+  const owner = found.card.source;
+  if (!owner?.mergeRequest || owner.ticket !== owner.mergeRequest.id) {
+    return res.status(400).json({ error: "this card is not a merge request's with no ticket" });
+  }
+  const source = loadTicketConfig(TICKETS_FILE).sources.find((each) => each.name === owner.name);
+  if (!source) return res.status(400).json({ error: `${owner.name} is not in ${TICKETS_FILE} any more` });
+  if (creatingTickets.has(found.card.id)) return res.status(409).json({ error: 'its issue is being made already' });
+  creatingTickets.add(found.card.id);
+  try {
+    const made = await createIssueForMergeRequest(source, owner.mergeRequest.reference);
+    const held = getCard(req.params.id);   // the user may have deleted it meanwhile: the issue is made all the same
+    if (held) {
+      const { card } = held;
+      const id = `${source.host}/${made.reference}`;
+      const link = { ...owner.mergeRequest, stage: made.stage };
+      rememberItem(`ticket:${source.name}`, id, card.id);
+      card.source.ticket = id;
+      delete card.source.mergeRequest;
+      if (webURL(made.url)) {
+        card.attachments.push({ id: randomUUID(), type: 'url', url: webURL(made.url), title: made.reference, createdAt: now(),
+          order: card.attachments.length });
+      }
+      syncMergeRequests(card, { reference: made.reference, status: '', mergeRequests: [link] }, true);
+      card.updatedAt = now();
+      persist();
+    }
+    res.json({ ...made, cardId: held ? held.card.id : null });
+  } catch (error) {
+    res.status(502).json({ error: error.message });
+  } finally {
+    creatingTickets.delete(found.card.id);
   }
 });
 

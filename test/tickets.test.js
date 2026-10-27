@@ -322,8 +322,9 @@ async function ticketBoard(issues, { signIn = false, config, delay = 0 } = {}) {
   fs.writeFileSync(issuesFile, JSON.stringify(issues));
   const sources = [{ kind: 'gitlab', host: 'gitlab.example.com', command: FAKE_GLAB }];
   fs.writeFileSync(path.join(data, 'tickets.json'), JSON.stringify(config ?? { sources }));
-  const board = await startBoard(signIn, { data, env: { FAKE_GLAB_ISSUES: issuesFile, FAKE_GLAB_DELAY: String(delay) } });
-  return { ...board, issuesFile };
+  const logFile = path.join(data, 'fake-glab-writes.jsonl');
+  const board = await startBoard(signIn, { data, env: { FAKE_GLAB_ISSUES: issuesFile, FAKE_GLAB_DELAY: String(delay), FAKE_GLAB_LOG: logFile } });
+  return { ...board, issuesFile, writes: () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8').trim().split('\n').map((line) => JSON.parse(line)) : []) };
 }
 
 async function refresh(board, token) {
@@ -722,6 +723,33 @@ test("a press that cannot read the merge requests leaves the cards' first line a
       const card = await cardOf(board, cardId);
       assert.deepEqual([card.description, linksOf(card)], ['**acme/web#1** · To do · 1 MR: 1 draft', ['acme/web#1', 'web!3 · draft']], what);
     }
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test("Create GitLab issue on a draft's own card makes the issue, names it in the draft, and the card is the issue's", async () => {
+  const draft = mergeRequest(6, 'Draft: Tidy the toolbar');
+  const board = await ticketBoard({ issues: [], mergeRequests: [draft], related: {} });
+  try {
+    const cardId = (await refresh(board)).body.added[0].cardId;
+    assert.equal((await cardOf(board, cardId)).source.mergeRequest.reference, 'acme/web!6', 'the card knows its merge request');
+    const { status, body } = await call(board, 'POST', `/api/cards/${cardId}/create-ticket`);
+    assert.equal(status, 200);
+    assert.deepEqual([body.reference, body.assigned, body.linked, body.cardId], ['acme/web#12', true, true, cardId]);
+    assert.deepEqual(board.writes(), [
+      { method: 'POST', endpoint: 'projects/acme%2Fweb/issues', body: { title: 'Tidy the toolbar', description: 'Tracks !6.', assignee_ids: [7] } },
+      { method: 'PUT', endpoint: 'projects/acme%2Fweb/merge_requests/6', body: { description: 'Refs #12' } },
+    ]);
+    let card = await cardOf(board, cardId);
+    assert.deepEqual([card.description, linksOf(card), card.source.mergeRequest], ['**acme/web#12** · 1 MR: 1 draft', ['web!6 · draft', 'acme/web#12'], undefined]);
+    assert.equal((await call(board, 'POST', `/api/cards/${cardId}/create-ticket`)).status, 400, 'once is enough');
+    fs.writeFileSync(board.issuesFile, JSON.stringify({ issues: [gitlabIssue(12, 'Tidy the toolbar', { status: TO_DO })],
+      mergeRequests: [{ ...draft, description: 'Refs #12' }], related: { 'acme/web!6': [relatedIssue('acme/web', 12, 'Tidy the toolbar')] } }));
+    const next = (await refresh(board)).body;
+    assert.deepEqual([next.added, next.onBoard], [[], 1], 'the next press finds the issue on that card');
+    card = await cardOf(board, cardId);
+    assert.equal(card.description, '**acme/web#12** · To do · 1 MR: 1 draft');
   } finally {
     await stopBoard(board);
   }

@@ -907,9 +907,47 @@ $('add-binder-btn').addEventListener('click', async () => {
 // ↻ Tickets shows once <data>/tickets.json names a tracker (see the README). It puts the user's
 // open tickets on this board where new items land, but not one in review or later, nor one
 // that has a card already (server.js).
+let ticketsOffered = false;
 function showTicketsTool(offered) {
-  $('refresh-tickets-btn').classList.toggle('hidden', DEMO || !offered);
+  ticketsOffered = !DEMO && !!offered;
+  $('refresh-tickets-btn').classList.toggle('hidden', !ticketsOffered);
 }
+// A draft's own card (no ticket yet) offers to make its GitLab issue (server.js, create-ticket). It
+// writes to GitLab, so the first click only asks; the second, within a few seconds, makes it.
+let ticketArmed = null;
+function showTicketActions(card) {
+  const mergeRequest = ticketsOffered && card.source?.mergeRequest;
+  $('ticket-actions').classList.toggle('hidden', !mergeRequest);
+  if (!mergeRequest) return;
+  const project = mergeRequest.reference.split('!')[0];
+  $('ticket-actions-note').textContent = `${mergeRequest.reference.split('/').pop()} has no ticket yet.`;
+  const button = $('create-ticket-btn');
+  clearTimeout(ticketArmed); ticketArmed = null;
+  button.disabled = false; button.textContent = 'Create GitLab issue';
+  button.title = `Makes an issue in ${project}, titled as the merge request and assigned to you, and adds "Refs #…" to its description`;
+}
+$('create-ticket-btn').addEventListener('click', async () => {
+  const card = currentCard();
+  const button = $('create-ticket-btn');
+  if (!card?.source?.mergeRequest) return;
+  if (!ticketArmed) {
+    button.textContent = `Make it in ${card.source.mergeRequest.reference.split('!')[0]}?`;
+    ticketArmed = setTimeout(() => showTicketActions(card), 4000);
+    return;
+  }
+  clearTimeout(ticketArmed); ticketArmed = null;
+  button.disabled = true; button.textContent = 'Making it…';
+  try {
+    const made = await api('POST', `/api/cards/${card.id}/create-ticket`);
+    toast(`Made ${made.reference}${made.assigned ? '' : ' (GitLab did not assign it to you)'}`);
+    if (made.linked !== true) toast(`Add "Refs #${made.reference.split('#').pop()}" to the merge request by hand: ${made.linked}`);
+    await reloadWorkspace();
+    if (currentCardId === card.id) openCard(card.id);
+  } catch (err) {
+    toast(err.message);
+    showTicketActions(card);
+  }
+});
 function ticketsSummary(answer) {
   const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
   const landing = ws.binders[0]?.title;
@@ -1274,6 +1312,7 @@ $('chat-input').addEventListener('keydown', (e) => {
 });
 function showCardMeta(card) {
   $('card-meta').textContent = `Created ${shortDate(card.createdAt)} · Updated ${shortDate(card.updatedAt)}`;
+  showTicketActions(card);
 }
 function closeModal() { closeTerminal(); overlay.classList.add('hidden'); currentCardId = null; }
 let overlayPressTarget = null;
