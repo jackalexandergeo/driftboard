@@ -320,19 +320,25 @@ function withoutRemoteMedia(html) {
 }
 // The text of a description for a card's face. Only markdown's own marks go: a hyphen, a # or
 // an underscore inside a word (follow-up, acme/web-app#12, snake_case) is text, and so is a
-// mark escaped with a backslash (set aside first, put back as itself last).
+// mark escaped with a backslash (set aside first, put back as itself last). The face shows two
+// lines, so only the start is read, and no pattern looks past its own line: a long description
+// must not stall the board's drawing.
+const PREVIEW_SOURCE = 2000;
 function stripMd(s) {
   const escaped = [];
-  return String(s || '')
-    .replace(/\\([\\`*_{}[\]()#+\-.!<>|~])/g, (_, mark) => `\uE000${escaped.push(mark) - 1}\uE000`)
-    .replace(/!\[.*?\]\(.*?\)/g, '')                       // images
-    .replace(/\[(.*?)\]\(.*?\)/g, '$1')                     // links -> text
-    .replace(/^ {0,3}([-*_] *){3,}$/gm, ' ')                // rules
-    .replace(/^ {0,3}(#{1,6} +|(> ?)+|[-*+] +)/gm, '')      // heading, quote and list marks
-    .replace(/(\*\*|__|~~)(.+?)\1/g, '$2')                  // bold, strikethrough
-    .replace(/(^|\W)[*_](\S(?:.*?\S)?)[*_](?=\W|$)/g, '$1$2') // italics
-    .replace(/`+/g, '')                                     // code
-    .replace(/\uE000(\d+)\uE000/g, (_, index) => escaped[index])
+  return String(s || '').slice(0, PREVIEW_SOURCE)
+    .replace(/\\([\\`*_{}[\]()#+\-.!<>|~])/g, (_, mark) => `${escaped.push(mark) - 1}`)
+    .replace(/!\[[^\]\n]*\]\([^)\n]*\)/g, '')                               // images
+    .replace(/\[([^\]\n]*)\]\([^)\n]*\)/g, '$1')                             // links -> text
+    .replace(/^ {0,3}([-*_] *){3,}$/gm, ' ')                                 // rules
+    .replace(/^[ \t|:-]*-{3}[ \t|:-]*$/gm, ' ')                              // a table's rule
+    .replace(/^([ \t]*#{1,6}[ \t][^\n]*?)[ \t]+#+[ \t]*$/gm, '$1')           // a heading's closing #s
+    .replace(/^(?:[ \t]*(?:>|#{1,6}(?=[ \t])|[-*+](?=[ \t])))+[ \t]*/gm, '')  // heading, quote and list marks
+    .replace(/(\*\*|~~)([^\n]{1,200}?)\1/g, '$2')                           // bold, strikethrough
+    .replace(/(^|\W)__([^\n]{1,200}?)__(?=\W|$)/g, '$1$2')                  // bold with _, not inside a word
+    .replace(/(^|\W)[*_]([^\s*_](?:[^*_\n]{0,200}?[^\s*_])?)[*_](?=\W|$)/g, '$1$2') // italics
+    .replace(/`+/g, '')                                                      // code
+    .replace(/(\d+)/g, (_, index) => escaped[index])
     .replace(/\s+/g, ' ')
     .trim();
 }
