@@ -176,16 +176,8 @@ async function gitlabTickets(source, run, onTime) {
     if (answer.errors?.length) throw new Error(answer.errors.map((error) => error.message).join('; '));
     return answer.data;
   };
-  let me;
-  try {
-    me = (await graphql('query { currentUser { username name publicEmail commitEmail emails { nodes { email } } } }')).currentUser;
-  } catch (error) {
-    if (!/doesn't exist|permission|not authorized/i.test(error.message)) throw error;
-    me = (await graphql('query { currentUser { username name } }')).currentUser;   // an older GitLab, or no read_user: by name
-  }
-  if (!me) throw new Error(`${source.command} is not signed in to ${source.host}`);
-  const mine = authorOf({ username: me.username, name: me.name,
-    emails: [me.publicEmail, me.commitEmail, ...(me.emails?.nodes || []).map((node) => node?.email)] });
+  const me = await gitlabIdentity(source, run);
+  const mine = authorOf(me);
   let query = GITLAB_ISSUES(true);
   const issuesAfter = async (after) => {
     const variables = { username: me.username, ...(after ? { after } : {}) };
@@ -244,13 +236,30 @@ function namesIssue(words, path, iid, project) {
   return new RegExp(forms.join('|'), 'i').test(words);   // GitLab takes a path in any case
 }
 
-// Whether the user wrote a commit: by one of their emails, or by their username or name where GitLab
-// gave no email. A branch carries colleagues' commits too (one merged in, a long-lived branch).
+// Who the user is on GitLab: their id, username, name, and every email GitLab knows for them (/user and
+// /user/emails). The refresh and Create GitLab issue both ask it this way, so they never disagree about
+// whose a commit is.
+async function gitlabIdentity(source, run) {
+  const ask = async (endpoint) => parsed(await run(source.command, ['api', '--hostname', source.host, endpoint]), source.command);
+  const me = await ask('user');
+  if (!textOf(me?.id) || !textOf(me.username)) throw new Error(`${source.command} is not signed in to ${source.host}`);
+  let more = [];
+  try {
+    more = await ask('user/emails');
+  } catch {
+    // a token without read_user: the emails /user gave still count, and the name
+  }
+  return { id: me.id, username: me.username, name: me.name,
+    emails: [me.email, me.commit_email, me.public_email, ...(Array.isArray(more) ? more : []).map((each) => each?.email)] };
+}
+
+// Whether the user wrote a commit: by one of their emails, or by their username or name (a commit made
+// with an email GitLab does not know). A branch carries colleagues' commits too (one merged in, a
+// long-lived branch).
 function authorOf({ username, name, emails }) {
   const known = new Set(emails.map((email) => textOf(email).trim().toLowerCase()).filter(Boolean));
   const names = new Set([username, name].map((each) => textOf(each).trim().toLowerCase()).filter(Boolean));
-  return (commit) => (known.size ? known.has(textOf(commit?.author_email).trim().toLowerCase())
-    : names.has(textOf(commit?.author_name).trim().toLowerCase()));
+  return (commit) => known.has(textOf(commit?.author_email).trim().toLowerCase()) || names.has(textOf(commit?.author_name).trim().toLowerCase());
 }
 
 // The open issues GitLab links to a merge request that its own words name: its title and
@@ -418,11 +427,11 @@ export async function createIssueForMergeRequest(source, reference, run = runToo
   const call = async (endpoint, method, body) => parsed(await run(source.command, ['api', '--hostname', source.host,
     ...(method ? ['-X', method, '-H', 'Content-Type: application/json', '--input', '-'] : []), endpoint],
   body === undefined ? undefined : JSON.stringify(body)), source.command);
-  const [me, mergeRequest] = await Promise.all([call('user'), call(`${base}/merge_requests/${iid}`)]);
+  const [me, mergeRequest] = await Promise.all([gitlabIdentity(source, run), call(`${base}/merge_requests/${iid}`)]);
   if (mergeRequest?.state !== 'opened') throw new Error(`${reference} is not open any more`);
   if (!me?.id || mergeRequest.author?.id !== me.id) throw new Error(`${reference} is not yours`);
   const description = textOf(mergeRequest.description);
-  const mine = authorOf({ username: me.username, name: me.name, emails: [me.email, me.commit_email, me.public_email] });
+  const mine = authorOf(me);
   const named = await openIssuesNamedBy(source, run, () => {}, project, iid, `${textOf(mergeRequest.title)}\n${description}`, mine);
   if (named.length) throw new Error(`${reference} works on ${textOf(named[0].web_url)} already: the next refresh puts it there`);
   // One a press made before, cut off before it could name it in the merge request (the board stopped):

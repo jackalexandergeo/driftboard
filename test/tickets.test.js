@@ -51,10 +51,12 @@ function fakeGlab(pages, { statusField = true, mergeRequests = [], related = {},
     if (query.includes('authoredMergeRequests')) {
       return JSON.stringify({ data: { currentUser: { authoredMergeRequests: { pageInfo: { hasNextPage: false }, nodes: mergeRequests } } } });
     }
-    if (query.includes('currentUser') && query.includes('emails') && !emails) throw new Error("glab: Field 'emails' doesn't exist on type 'CurrentUser'");
-    if (query.includes('currentUser')) {
-      return JSON.stringify({ data: { currentUser: { username: 'pat', name: 'Pat Doe', ...(emails ? { emails: { nodes: [{ email: 'Pat@example.com' }] } } : {}) } } });
+    if (args[3] === 'user') return JSON.stringify({ id: 7, username: 'pat', name: 'Pat Doe', ...(emails ? { email: 'Pat@example.com' } : {}) });
+    if (args[3] === 'user/emails') {
+      if (!emails) throw new Error('glab: 403 Forbidden');   // a token without read_user
+      return JSON.stringify([{ email: 'pat@old-laptop.example' }]);
     }
+    if (query.includes('currentUser')) return JSON.stringify({ data: { currentUser: { username: 'pat' } } });
     if (!statusField && query.includes('status {')) throw new Error("glab: Field 'status' doesn't exist on type 'Issue'");
     const after = args.find((arg) => arg.startsWith('after='))?.slice('after='.length);
     const index = after ? Number(after) : 0;
@@ -166,6 +168,20 @@ test("GitLab: an MR's commits count only when the user wrote them, by email, or 
   }
 });
 
+test("GitLab: a commit is the user's by any email GitLab knows for them, or by their name, as Create GitLab issue sees it", async () => {
+  const { run } = fakeGlab([[]], {
+    mergeRequests: [mergeRequest(3, 'Draft: Login work')],
+    related: { 'acme/web!3': [relatedIssue('acme/web', 1, 'Fix login'), relatedIssue('acme/web', 2, 'Fix logout'), relatedIssue('acme/web', 4, 'Fix signup')] },
+    commits: { 'acme/web!3': [
+      { message: 'Refs acme/web#1', author_name: 'pat', author_email: 'pat@old-laptop.example' },   // a second email of theirs
+      { message: 'Refs acme/web#2', author_name: 'Pat Doe', author_email: 'pat@build-box.example' },   // their name, an unknown email
+      { message: 'Refs acme/web#4', author_name: 'Sam', author_email: 'sam@example.com' },
+    ] },
+  });
+  const { tickets } = await fetchTickets(gitlab, run);
+  assert.deepEqual(tickets.map((ticket) => ticket.reference), ['acme/web#1', 'acme/web#2']);
+});
+
 test("GitLab: a merge request that cannot be looked into is named, and the rest of the read stands", async () => {
   const { run } = fakeGlab([[gitlabIssue(1, 'Fix login', { status: TO_DO })]], {
     mergeRequests: [mergeRequest(3, 'Draft: Login API'), mergeRequest(4, 'Draft: Login form', { description: 'Refs acme/web#1' }),
@@ -206,8 +222,11 @@ test('GitLab without issue statuses: the labels say it', async () => {
 });
 
 test('GitLab: a tool that is not signed in says so', async () => {
-  const run = async () => JSON.stringify({ data: { currentUser: null } });
-  await assert.rejects(fetchTickets(gitlab, run), /not signed in to gitlab\.example\.com/);
+  const run = async (command, args) => {
+    if (args[3] === 'user') throw new Error('glab: 401 Unauthorized');
+    return JSON.stringify({ data: { currentUser: null } });
+  };
+  await assert.rejects(fetchTickets(gitlab, run), /401 Unauthorized/);
 });
 
 test('a tool gets its input on stdin, and none when there is none', async () => {
@@ -277,6 +296,7 @@ function fakeGitLabWrites({ mergeRequest, me = { id: 7, username: 'pat', email: 
     const endpoint = args[args.length - 1];
     calls.push({ method, endpoint, body: input ? JSON.parse(input) : undefined });
     if (endpoint === 'user') return JSON.stringify(me);
+    if (endpoint === 'user/emails') return '[]';
     if (endpoint.includes('/related_issues')) return JSON.stringify(related);
     if (endpoint.includes('/commits')) return '[]';
     if (method === 'GET' && endpoint.includes('/issues?')) return JSON.stringify(earlier);
