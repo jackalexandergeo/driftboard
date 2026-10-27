@@ -32,7 +32,7 @@ function relatedIssue(project, iid, title, { state = 'opened', form = 'issues' }
 
 // glab, answering GraphQL (who the user is, pages of their issues, their merge requests) and the
 // REST list of the issues each merge request works on, from related: {"<project>!<iid>": [issue]}.
-function fakeGlab(pages, { statusField = true, mergeRequests = [], related = {}, commits = {} } = {}) {
+function fakeGlab(pages, { statusField = true, mergeRequests = [], related = {}, commits = {}, commitPageTime = 0 } = {}) {
   const calls = [];
   const run = async (command, args) => {
     calls.push([command, ...args]);
@@ -42,6 +42,7 @@ function fakeGlab(pages, { statusField = true, mergeRequests = [], related = {},
     if (rest) return JSON.stringify(issues ?? []);
     const commitsOf = /^projects\/(.+)\/merge_requests\/(\d+)\/commits\?per_page=100&page=(\d+)$/.exec(args[3]);
     if (commitsOf) {
+      await new Promise((resolve) => setTimeout(resolve, commitPageTime));
       const all = commits[`${decodeURIComponent(commitsOf[1])}!${commitsOf[2]}`] ?? [];
       return JSON.stringify(all.slice((commitsOf[3] - 1) * 100, commitsOf[3] * 100).map((message) => ({ message })));
     }
@@ -137,14 +138,16 @@ test("GitLab: an MR's work is the issues its title, description or commits name,
 
 test("GitLab: a merge request that cannot be looked into is named, and the rest of the read stands", async () => {
   const { run } = fakeGlab([[gitlabIssue(1, 'Fix login', { status: TO_DO })]], {
-    mergeRequests: [mergeRequest(3, 'Draft: Login API'), mergeRequest(4, 'Draft: Login form', { description: 'Refs acme/web#1' })],
-    related: { 'acme/web!3': 'fails', 'acme/web!4': [relatedIssue('acme/web', 1, 'Fix login')] },
+    mergeRequests: [mergeRequest(3, 'Draft: Login API'), mergeRequest(4, 'Draft: Login form', { description: 'Refs acme/web#1' }),
+      mergeRequest(5, 'Draft: Login tests')],
+    related: { 'acme/web!3': 'fails', 'acme/web!4': [relatedIssue('acme/web', 1, 'Fix login')], 'acme/web!5': 'fails' },
   });
   const { tickets, mergeRequests, problems } = await fetchTickets(gitlab, run);
   assert.deepEqual(tickets.map((ticket) => [ticket.reference, ticket.mergeRequests.map((link) => link.reference)]), [['acme/web#1', ['acme/web!4']]],
     'not a card of its own: it works on something, it is only not known what');
-  assert.deepEqual(mergeRequests.map((link) => link.reference), ['acme/web!3', 'acme/web!4'], 'still open, all the same');
-  assert.deepEqual(problems, ['acme/web!3: glab: 404 Not Found']);
+  assert.deepEqual(mergeRequests.map((link) => link.reference), ['acme/web!3', 'acme/web!4', 'acme/web!5'], 'still open, all the same');
+  assert.deepEqual(problems, ['2 merge requests could not be looked into: acme/web!3, acme/web!5 (glab: 404 Not Found)'],
+    'one message for them all: a GitLab failing halfway would otherwise give one each');
 });
 
 test('GitLab: out of time before the merge requests, the issues read stand and the merge requests are named', async () => {

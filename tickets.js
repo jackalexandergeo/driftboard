@@ -256,6 +256,7 @@ async function addMergeRequestWork(source, tickets, graphql, run, onTime, proble
     onTime();
     after = found.pageInfo.endCursor;
   }
+  const unanswered = [];   // {link, error}: told as one problem, not one each
   const worksOn = await eachAtOnce(open, async ({ project, iid, words, link }) => {
     onTime();
     const ask = async (what) => {
@@ -280,10 +281,15 @@ async function addMergeRequestWork(source, tickets, graphql, run, onTime, proble
         return issue?.state === 'opened' && where && namesIssue(named, where[1], where[2], project);
       });
     } catch (error) {
-      problems.push(`${link.reference}: ${error.message}`);
+      unanswered.push({ link, error });
       return null;
     }
   });
+  if (unanswered.length) {
+    const references = unanswered.map(({ link }) => link.reference);
+    problems.push(`${references.length} merge request${references.length === 1 ? '' : 's'} could not be looked into: `
+      + `${references.slice(0, 5).join(', ')}${references.length > 5 ? ', …' : ''} (${unanswered[0].error.message})`);
+  }
   const issues = new Map();   // id → {issue, reference, links}: every open issue an open merge request works on
   open.forEach(({ link }, index) => {
     if (!worksOn[index]) return;   // not known what it works on
