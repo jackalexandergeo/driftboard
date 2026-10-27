@@ -287,8 +287,10 @@ With sign-in off, no key is needed.
 ## 🎫 Bring in your tickets
 
 **↻ Tickets** in the toolbar puts your open tickets from GitLab or GitHub on the board you
-are looking at, where new items land. Each ticket still yours gets a card with its title,
-its reference and status, and a link to it. A ticket gets no card when:
+are looking at. Each ticket still yours gets a card with its title, its reference and status,
+and a link to it, in the column named as its status if the board has one ("In Progress",
+"Awaits review"); a ticket in review that a draft keeps on the board goes to a column for that
+stage ("Reviewing"); anything else goes where new items land. A ticket gets no card when:
 
 - it is past your part: its status has a word starting with `review`, `verif`, `qa`, `test`,
   `done`, `deploy`, `merg`, `releas`, `closed`, `cancel` or `won't` ("Awaits Review", "Ready for
@@ -299,8 +301,9 @@ its reference and status, and a link to it. A ticket gets no card when:
   note may name tickets it is not about.
 
 On GitLab it also reads your open merge requests, and which issues each works on: the ones GitLab
-links to it that its title, description or commit messages name (`Refs acme/web#5`), not one a
-reviewer only mentions in a comment:
+links to it that its title, its description or the messages of commits you wrote name
+(`Refs acme/web#5`), not one a reviewer only mentions in a comment, nor a colleague's commit
+carried on the same branch:
 
 - An issue often has several merge requests, one per repository, so the card stays the issue's,
   and its merge requests are links on it named by repository, number and stage (`web!6 ·
