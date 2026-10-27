@@ -294,10 +294,28 @@ its reference and status, and a link to it. A ticket gets no card when:
   `done`, `deploy`, `merg`, `releas`, `closed`, `cancel` or `won't` ("Awaits Review", "Ready for
   QA", "Deployed"). Backlog, to do, in progress and blocked all get one.
 - it has a card already: one ↻ Tickets made (if you deleted it, it stays gone), or any card on
-  any board that links the ticket.
+  any board that links the ticket or gives its address in its description or a note (as an agent
+  does for the ticket it opened). A bare reference like `acme/web#5` in a note does not count: a
+  note may name tickets it is not about.
+
+On GitLab it also reads your open merge requests, and which issues each works on (GitLab's own
+link, not a `#123` read out of a description):
+
+- An issue often has several merge requests, one per repository, so the card stays the issue's,
+  and its merge requests are links on it named by repository, number and stage (`web!6 ·
+  draft`). Its first line says how they stand: "acme/web#5 · In progress · 3 MRs: 2 draft, 1
+  ready". A merge request that works on two issues is on both their cards.
+- A draft is work going on: the issues it works on get a card, assigned to you or not, whatever
+  their status. A merge request ready for review brings in nothing by itself (it is in review),
+  but is listed on a card its issue has anyway.
+- A draft that works on no open issue gets a card of its own, "Draft MR, no ticket yet". Once its
+  issue is there, that card becomes the issue's card, not a second one.
+- Each press brings the cards ↻ Tickets made up to date: new merge requests are added, stages
+  change, and one no longer open is marked "merged or closed" rather than taken off. The first
+  line follows too, unless you have written over it.
 
 Press it whenever you like; it only adds what is new, and says what it did ("3 new tickets in
-To Do · 11 on the board already · 5 in review or later"). It never starts an agent, Autostart
+To Do · 2 cards brought up to date · 11 on the board already · 5 in review or later"). It never starts an agent, Autostart
 or not. The button shows once `<data>/tickets.json` names your trackers:
 
 ```json
@@ -327,9 +345,10 @@ file says: nothing on the board can change it. Edits count at the next press.
   "Awaits Review" under *in progress*, so the name decides, not the category.
 - **GitHub**: the open issues assigned to you in every repository you can see (pull requests
   left out). GitHub issues have no status of their own, so a label like `status: in review` is it.
+  Pull requests are not read yet.
 
 A script can press it too: `POST /api/workspaces/<id>/refresh-tickets` with the board's token
-answers `{added: [{cardId, title}], onBoard, removed, late, problems}`; a tracker that could not
+answers `{added: [{cardId, title}], updated, onBoard, removed, late, problems}`; a tracker that could not
 be read is named in `problems` and the others still come in. The items key cannot.
 
 ## 🤖 Put an AI agent on a card
