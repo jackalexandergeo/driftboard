@@ -116,6 +116,21 @@ test('GitHub: assigned issues, without the pull requests the same list carries',
   ]);
 });
 
+test('GitHub: every page of 100 is read, and the last short one ends it', async () => {
+  const asked = [];
+  const run = async (command, args) => {
+    const page = Number(/[?&]page=(\d+)/.exec(args[3])[1]);
+    asked.push(page);
+    const count = page === 1 ? 100 : 1;
+    return JSON.stringify(Array.from({ length: count }, (_, index) => ({
+      number: page * 1000 + index, title: `Issue ${page}.${index}`, html_url: `https://github.com/acme/app/issues/${page * 1000 + index}`,
+      repository: { full_name: 'acme/app' }, labels: [],
+    })));
+  };
+  const tickets = await fetchTickets(github, run);
+  assert.deepEqual([asked, tickets.length], [[1, 2], 101]);
+});
+
 test('tickets.json is checked, and each problem says what to write', () => {
   const config = parseTicketConfig(JSON.stringify({
     sources: [{ kind: 'gitlab' }, { kind: 'gitlab', host: 'git.example.org' }, { kind: 'jira' }, { kind: 'github', host: 'not a host' }],
@@ -138,13 +153,13 @@ test('tickets.json is checked, and each problem says what to write', () => {
 const FAKE_GLAB = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fake-glab.js');
 const TO_DO = { name: 'To do', category: 'to_do' };
 
-async function ticketBoard(issues, { signIn = false, config } = {}) {
+async function ticketBoard(issues, { signIn = false, config, delay = 0 } = {}) {
   const data = newDataFolder();
   const issuesFile = path.join(data, 'fake-issues.json');
   fs.writeFileSync(issuesFile, JSON.stringify(issues));
   const sources = [{ kind: 'gitlab', host: 'gitlab.example.com', command: FAKE_GLAB }];
   fs.writeFileSync(path.join(data, 'tickets.json'), JSON.stringify(config ?? { sources }));
-  const board = await startBoard(signIn, { data, env: { FAKE_GLAB_ISSUES: issuesFile } });
+  const board = await startBoard(signIn, { data, env: { FAKE_GLAB_ISSUES: issuesFile, FAKE_GLAB_DELAY: String(delay) } });
   return { ...board, issuesFile };
 }
 
@@ -328,6 +343,36 @@ test("a ticket's reference and status are text on its card, not markdown a label
     const { body } = await refresh(board);
     const card = (await call(board, 'GET', `/api/cards/${body.added[0].cardId}`)).body.card;
     assert.equal(card.description, '**acme/web#1** · \\[Click me\\]\\(https://evil.example\\) \\<b\\>now\\</b\\>');
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test('one refresh at a time: a second press while the first reads is told so', async () => {
+  const board = await ticketBoard([gitlabIssue(1, 'One', { status: TO_DO })], { delay: 600 });
+  try {
+    const [first, second] = await Promise.all([refresh(board), new Promise((resolve) => setTimeout(resolve, 150)).then(() => refresh(board))]);
+    assert.deepEqual([first.status, first.body.added.length], [200, 1]);
+    assert.deepEqual([second.status, second.body.error], [409, 'the tickets are being read already']);
+    assert.equal((await refresh(board)).status, 200, 'and the next press after it is read');
+  } finally {
+    await stopBoard(board);
+  }
+});
+
+test('a board deleted while its tickets were read gets none, and no other board does', async () => {
+  const board = await ticketBoard([gitlabIssue(1, 'One', { status: TO_DO })], { delay: 600 });
+  try {
+    const doomed = (await call(board, 'POST', '/api/workspaces', { name: 'Doomed' })).body;
+    const reading = call(board, 'POST', `/api/workspaces/${doomed.id}/refresh-tickets`);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal((await call(board, 'DELETE', `/api/workspaces/${doomed.id}`)).status, 200);
+    assert.equal((await reading).status, 404);
+    const { workspaces } = (await call(board, 'GET', '/api/state')).body;
+    for (const { id } of workspaces) {
+      const ws = (await call(board, 'GET', `/api/workspaces/${id}`)).body;
+      assert.equal(ws.cards.filter((card) => card.source?.name === 'gitlab').length, 0);
+    }
   } finally {
     await stopBoard(board);
   }

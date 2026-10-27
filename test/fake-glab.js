@@ -1,6 +1,10 @@
 #!/usr/bin/env node
-// glab for the ticket tests: answers the board's GraphQL with the issues in $FAKE_GLAB_ISSUES (a JSON list).
+// glab for the ticket tests: answers the board's GraphQL with the issues in $FAKE_GLAB_ISSUES (a JSON list),
+// after $FAKE_GLAB_DELAY milliseconds when that is set.
 import fs from 'node:fs';
+import { setTimeout as sleep } from 'node:timers/promises';
+
+await sleep(Number(process.env.FAKE_GLAB_DELAY) || 0);
 
 const query = process.argv[process.argv.indexOf('-f') + 1];
 const answer = query.includes('currentUser')
